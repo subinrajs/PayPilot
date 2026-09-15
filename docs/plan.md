@@ -9,7 +9,7 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 | Phase | Name | Status |
 |---|---|---|
 | 1 | Scaffolding & environment | Done |
-| 2 | Stripe sandbox seed script | Not started |
+| 2 | Stripe sandbox seed script | Done |
 | 3 | Backend core: tools & Stripe integration | Not started |
 | 4 | Web chat assistant | Not started |
 | 5 | Web chat UI | Not started |
@@ -25,8 +25,8 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 
 ## Phase 2 — Stripe sandbox seed script
 
-- [ ] `pnpm seed` creates the 4 test customers, a mix of successful/declined payments, and the four invoice states (paid, outstanding under the cap, overdue, at/above the cap) described in `docs/spec.md`
-- [ ] Seed script prints the link-token(s) needed to connect a Telegram chat to a seeded customer (see `docs/design.md` open items)
+- [x] `pnpm seed` creates the 4 test customers, a mix of successful/declined payments, and the four invoice states (paid, outstanding under the cap, overdue, at/above the cap) described in `docs/spec.md`
+- [x] Seed script prints the link-token(s) needed to connect a Telegram chat to a seeded customer (see `docs/design.md` open items)
 
 ## Phase 3 — Backend core: tools & Stripe integration
 

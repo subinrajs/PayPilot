@@ -73,3 +73,11 @@ Lightweight ADRs for the choices summarized in `docs/design.md`. Each record: co
 **Decision** — Every tool implementation and the confirm route validates its input against a Zod schema before doing anything else.
 
 **Consequences** — Malformed or adversarial input fails fast with a clear validation error instead of causing a confusing downstream failure (or, worse, being coerced into something unintended). Adds a schema to maintain per tool, kept close to the tool it validates.
+
+## ADR-010: The Telegram link-token is the Stripe customer id
+
+**Context** — `docs/design.md` left the exact shape of the `telegramChatId → stripeCustomerId` link-token as an open item, candidate: "the seed script prints one link-token per seeded customer." ADR-004 already commits to persisting nothing beyond the `telegramChatId → stripeCustomerId` mapping itself — introducing a separately-generated, separately-stored token would mean a second piece of persisted state ahead of that mapping even existing.
+
+**Decision** — The link-token *is* the Stripe customer id (`cus_...`). The seed script prints each seeded customer's id as its link-token; Phase 6's `/start <link-token>` handler validates it via `stripe.customers.retrieve(token)` before recording the `telegramChatId → stripeCustomerId` mapping.
+
+**Consequences** — No separate token store, generation scheme, or expiry logic is needed — consistent with ADR-004's "no database" stance. The tradeoff is that the link-token is a real Stripe object id rather than an opaque single-purpose secret; acceptable for a test-mode sandbox where these ids carry no standalone authority (a Stripe secret key is still required for anything to act on them), and revisit if this ever needs to run against a live account.
