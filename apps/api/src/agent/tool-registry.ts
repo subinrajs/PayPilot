@@ -48,7 +48,10 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     description:
       "Resolve a natural-language reference to a specific customer and payment, and propose refunding it. " +
       "Does NOT execute the refund — returns a pending action the owner must separately confirm, or an " +
-      "ambiguous/not-found result if the reference didn't resolve to exactly one payment.",
+      "ambiguous/not-found result if the reference didn't resolve to exactly one payment. Always call this " +
+      "tool fresh for every refund request, even if you believe you already know the answer from earlier " +
+      "in the conversation (e.g. from a daily summary) — only this tool's live result is authoritative, " +
+      "since payment state can change between messages.",
     parametersSchema: RefundArgsSchema,
     handler: (stripe, args) => proposeRefund(stripe, args as RefundArgs),
   },

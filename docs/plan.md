@@ -12,7 +12,7 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 | 2 | Stripe sandbox seed script | Done |
 | 3 | Backend core: tools & Stripe integration | Done |
 | 4 | Web chat assistant | Done |
-| 5 | Web chat UI | Not started |
+| 5 | Web chat UI | Done |
 | 6 | Telegram bot | Not started |
 | 7 | Guardrail/policy test suite | Not started |
 | 8 | Polish & known limitations | Not started |
@@ -48,9 +48,9 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 
 ## Phase 5 — Web chat UI
 
-- [ ] React + Vite frontend: chat input/history, rendering assistant replies
-- [ ] Distinct UI state for "confirm this action" that calls `/api/assistant/confirm`
-- [ ] `pnpm dev` runs web + api together; README's "open the web app at" line filled in once the dev port is fixed
+- [x] React + Vite frontend: chat input/history, rendering assistant replies
+- [x] Distinct UI state for "confirm this action" that calls `/api/assistant/confirm`
+- [x] `pnpm dev` runs web + api together; README's "open the web app at" line filled in once the dev port is fixed
 
 ## Phase 6 — Telegram bot
 

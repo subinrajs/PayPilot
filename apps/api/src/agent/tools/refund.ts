@@ -10,8 +10,17 @@ import { displayName, findCustomersByReference } from "../customer-resolution.js
 // "last"); resolving them to a specific Stripe charge is this tool's own job, not the model's.
 export const RefundArgsSchema = z
   .object({
-    customerReference: z.string().min(1),
-    paymentReference: z.string().min(1).optional(),
+    customerReference: z.string().min(1).describe("The customer's name or email, as mentioned by the owner."),
+    paymentReference: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Which of the customer's payments to refund. Pass 'last' whenever the owner says " +
+          "'last', 'latest', 'most recent', or similar — do not leave this unset in that case, " +
+          "or the tool will treat every one of the customer's payments as equally ambiguous. " +
+          "Otherwise pass a distinguishing word from the payment's description (e.g. 'consulting').",
+      ),
   })
   .strict();
 export type RefundArgs = z.infer<typeof RefundArgsSchema>;
