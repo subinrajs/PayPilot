@@ -85,13 +85,13 @@ Open the web app at `http://localhost:5173` (API runs at `http://localhost:3000`
 
 ## 6. Run the Telegram bot
 
-*(Fill in: how the bot is started — same process as the API, or `pnpm --filter api telegram`? — and how to link a test customer, e.g. `/start <token>` from `docs/spec.md` §2.1.)*
+The bot starts automatically alongside the API — there's no separate command. `pnpm dev` (or `pnpm --filter api dev`) calls `startTelegramBot()` once the Fastify server is listening; if `TELEGRAM_BOT_TOKEN` isn't set in `apps/api/.env`, it logs a warning and skips starting rather than crashing the server, so the rest of the app still works without it.
 
 To test as a customer:
-1. Message the bot on Telegram
-2. `/start <link-token>` to associate your chat with a seeded customer
-3. Ask "what do I owe?" and try paying an invoice under $2,000
-4. Try an invoice at/above $2,000 to confirm it's handed off instead of paid
+1. Message your bot on Telegram directly (linking only works in a private 1:1 chat, not a group — the `telegramChatId → stripeCustomerId` mapping is per-chat, so a group chat would be shared by everyone in it)
+2. `/start <link-token>` — the link-token is the linked customer's Stripe id, printed by `pnpm seed` (§4)
+3. `/owe` to see outstanding invoices; tap **Pay** on one under $2,000, then **Confirm**
+4. Try an invoice at/above $2,000 — instead of a Pay button, you'll see a direct link to Stripe's own hosted invoice page (that page is Stripe's own payment surface, not something this bot's $2,000 cap governs)
 
 ---
 

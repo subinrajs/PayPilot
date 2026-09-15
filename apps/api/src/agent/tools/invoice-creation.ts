@@ -86,6 +86,10 @@ export async function executeInvoiceCreation(
     customer: resolved.customerId,
     collection_method: "send_invoice",
     due_date: isoDateToUnixSeconds(resolved.dueDate),
+    // The invoice ITEM's description (above) doesn't carry over to the invoice object itself —
+    // callers that show an invoice list (e.g. the Telegram bot) read `invoice.description`, not
+    // the line item's, so without this every invoice falls back to displaying its raw Stripe id.
+    description: resolved.description,
     // Without this, pending invoice items aren't attached and the invoice finalizes as a $0
     // invoice Stripe immediately marks "paid" — the exact bug hit and fixed in seed.ts.
     pending_invoice_items_behavior: "include",

@@ -27,7 +27,30 @@ describe("proposeInvoicePayment", () => {
 
     const result = await proposeInvoicePayment(asStripe(fake), "cus_sarah", { invoiceId: "in_2" });
 
-    expect(result).toEqual({ kind: "handoff", invoiceId: "in_2", amountCents: 250000 });
+    expect(result).toEqual({
+      kind: "handoff",
+      invoiceId: "in_2",
+      amountCents: 250000,
+      hostedInvoiceUrl: "https://invoice.stripe.com/i/fake",
+    });
+  });
+
+  it("falls back to a null hostedInvoiceUrl rather than throwing when Stripe doesn't provide one", async () => {
+    const fake = createFakeStripe();
+    fake.invoices.retrieve.mockResolvedValueOnce(
+      fakeInvoice({
+        id: "in_3",
+        customer: "cus_sarah",
+        amount_due: 250000,
+        paid: false,
+        status: "open",
+        hosted_invoice_url: null,
+      }),
+    );
+
+    const result = await proposeInvoicePayment(asStripe(fake), "cus_sarah", { invoiceId: "in_3" });
+
+    expect(result).toMatchObject({ kind: "handoff", hostedInvoiceUrl: null });
   });
 
   it("routes an invoice at exactly the cap boundary to handoff, not payment", async () => {

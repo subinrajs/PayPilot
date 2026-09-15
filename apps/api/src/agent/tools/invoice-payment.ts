@@ -18,9 +18,11 @@ export interface ResolvedInvoicePaymentArgs {
 
 export type ProposeInvoicePaymentResult =
   | { kind: "pending"; action: PendingAction<"pay_invoice", ResolvedInvoicePaymentArgs> }
-  // The exact customer-facing handoff mechanism is Phase 6's job — this only guarantees a
-  // payable pending action is never produced for an at/above-cap invoice.
-  | { kind: "handoff"; invoiceId: string; amountCents: number }
+  // Handoff mechanism (ADR-011): Stripe's own hosted invoice page, which has no concept of this
+  // app's cap — it's Stripe's own authorization surface, not a bypass of anything enforced here.
+  // Null only in the unlikely case a finalized invoice lacks one; callers should fall back to a
+  // plain "contact the business owner" message in that case.
+  | { kind: "handoff"; invoiceId: string; amountCents: number; hostedInvoiceUrl: string | null }
   | { kind: "not_found" }
   | { kind: "already_paid" };
 
@@ -44,7 +46,7 @@ export async function proposeInvoicePayment(
 
   const amountCents = invoice.amount_due;
   if (isAtOrAboveCap(amountCents)) {
-    return { kind: "handoff", invoiceId: invoice.id, amountCents };
+    return { kind: "handoff", invoiceId: invoice.id, amountCents, hostedInvoiceUrl: invoice.hosted_invoice_url ?? null };
   }
 
   const resolved: ResolvedInvoicePaymentArgs = { invoiceId: invoice.id, customerId, amountCents };

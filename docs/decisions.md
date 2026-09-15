@@ -81,3 +81,11 @@ Lightweight ADRs for the choices summarized in `docs/design.md`. Each record: co
 **Decision** — The link-token *is* the Stripe customer id (`cus_...`). The seed script prints each seeded customer's id as its link-token; Phase 6's `/start <link-token>` handler validates it via `stripe.customers.retrieve(token)` before recording the `telegramChatId → stripeCustomerId` mapping.
 
 **Consequences** — No separate token store, generation scheme, or expiry logic is needed — consistent with ADR-004's "no database" stance. The tradeoff is that the link-token is a real Stripe object id rather than an opaque single-purpose secret; acceptable for a test-mode sandbox where these ids carry no standalone authority (a Stripe secret key is still required for anything to act on them), and revisit if this ever needs to run against a live account.
+
+## ADR-011: The at/above-cap handoff mechanism is Stripe's own hosted invoice page
+
+**Context** — `docs/design.md` left the exact handoff mechanism for at/above-cap invoices as an open item, candidate: "a message directing the customer to contact the owner directly." This app has no stored contact channel for the owner (no email/phone on file), so that candidate has nothing concrete to point to.
+
+**Decision** — Every finalized Stripe invoice already carries a `hosted_invoice_url` — a real, working Stripe-hosted payment page. When `proposeInvoicePayment` routes an at/above-cap invoice to `{kind:"handoff"}`, it includes that URL (also surfaced on `invoice-lookup.ts`'s results), and the Telegram bot gives the customer that link directly instead of an instruction to "contact the owner."
+
+**Consequences** — No invented communication channel is needed, and the mechanism is free (the field is already on the Invoice object Stripe returns). This isn't a bypass of the $2,000 cap: the cap governs what's payable through *this app's own execution path* (`executeInvoicePayment`), not Stripe's own hosted checkout, which is Stripe's authorization surface and out of this app's control either way. Falls back to a plain "contact us directly" line in the unlikely case a finalized invoice lacks the URL.

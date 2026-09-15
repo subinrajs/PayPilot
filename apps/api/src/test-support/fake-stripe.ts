@@ -96,6 +96,7 @@ export function fakeInvoice(overrides: Partial<Stripe.Invoice> = {}): Stripe.Inv
     due_date: null,
     paid: false,
     description: null,
+    hosted_invoice_url: "https://invoice.stripe.com/i/fake",
     ...overrides,
   } as Stripe.Invoice;
 }

@@ -12,10 +12,10 @@ The Status/Notes table below is kept in sync with implementation by the `plan-tr
 | 2 | Refund a payment | Owner | Done | |
 | 3 | Create an invoice | Owner | Done | |
 | 4 | Compare revenue across periods | Owner | Done | |
-| 5 | Link Telegram chat to Stripe customer | Customer | Not started | |
-| 6 | View what I owe | Customer | Not started | |
-| 7 | Pay an invoice under the cap | Customer | Not started | |
-| 8 | Handoff for an invoice at or above the cap | Customer | Not started | Handoff mechanism still open, see `docs/design.md` |
+| 5 | Link Telegram chat to Stripe customer | Customer | Done | |
+| 6 | View what I owe | Customer | Done | |
+| 7 | Pay an invoice under the cap | Customer | Done | |
+| 8 | Handoff for an invoice at or above the cap | Customer | Done | ADR-011 settled the mechanism (Stripe's own `hosted_invoice_url`); live-verified against a real Telegram client linked to Sarah Johnson's $2,500 invoice — no Pay button shown, handoff message includes a working hosted invoice link |
 
 ## Web chat (business owner)
 
@@ -81,4 +81,4 @@ As a linked customer, I want to pay an outstanding invoice directly in the chat,
 As a linked customer with an invoice at or above $2,000, I want to be told how to pay it, so that I'm not stuck when the bot can't process it directly.
 
 - The bot never offers a payable pending action for an invoice at/above the cap — this is enforced in code (per `docs/design.md`), not by asking the model to decline.
-- The customer is told the invoice needs to be handled outside the bot, with next steps (exact handoff mechanism: open item, see `docs/design.md`).
+- The customer is told the invoice needs to be handled outside the bot, with next steps: the invoice's Stripe-hosted `hosted_invoice_url` (mechanism settled by ADR-011, see `docs/decisions.md`).

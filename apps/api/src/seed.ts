@@ -99,6 +99,10 @@ async function createSeedInvoice(
     customer: customerId,
     collection_method: "send_invoice",
     due_date: Math.floor((now.getTime() + opts.dueOffsetMs) / 1000),
+    // The invoice ITEM's description (above) doesn't carry over to the invoice object itself —
+    // without this, invoice.description is null and any caller listing invoices (e.g. the
+    // Telegram bot) falls back to displaying the raw Stripe id instead of something readable.
+    description: opts.description,
     // Without this, the invoice is created with no line items at all (the pending invoice item
     // created above stays unattached, `invoice: null`), so it finalizes as a $0 invoice that
     // Stripe immediately marks "paid" regardless of `pay` below — the pending item is only
