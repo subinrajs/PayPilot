@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consumePendingAction, setPendingAction } from "./pending-action-store.js";
+import { consumePendingAction, peekPendingAction, setPendingAction } from "./pending-action-store.js";
 import type { PendingAction } from "./pending-action.js";
 
 function makeAction(overrides: Partial<PendingAction> = {}): PendingAction {
@@ -34,5 +34,26 @@ describe("pending-action-store", () => {
     // Confirms it was actually removed, not just rejected — a second call also returns null
     // rather than (say) throwing "already consumed", proving there's no leftover state.
     expect(consumePendingAction("pa_3")).toBeNull();
+  });
+
+  it("peek returns the action without removing it", () => {
+    setPendingAction(makeAction({ id: "pa_4" }));
+
+    const peeked = peekPendingAction("pa_4");
+    expect(peeked?.id).toBe("pa_4");
+
+    // Still there — unlike consume, peek must not have deleted it.
+    expect(peekPendingAction("pa_4")?.id).toBe("pa_4");
+    expect(consumePendingAction("pa_4")?.id).toBe("pa_4");
+  });
+
+  it("peek returns null for an unknown or expired id, without creating any side effect", () => {
+    expect(peekPendingAction("pa_never_existed")).toBeNull();
+
+    setPendingAction(makeAction({ id: "pa_5", expiresAt: Date.now() - 1 }));
+    expect(peekPendingAction("pa_5")).toBeNull();
+    // Confirms peek didn't delete it either — expired entries are still cleaned up by consume,
+    // not left to leak, but peek's job is only to answer "is this valid", not to mutate state.
+    expect(consumePendingAction("pa_5")).toBeNull();
   });
 });

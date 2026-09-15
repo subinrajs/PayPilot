@@ -10,7 +10,7 @@ import {
   executeInvoicePayment,
   type ResolvedInvoicePaymentArgs,
 } from "../agent/tools/invoice-payment.js";
-import { setPendingAction, consumePendingAction } from "../agent/pending-action-store.js";
+import { setPendingAction, consumePendingAction, peekPendingAction } from "../agent/pending-action-store.js";
 import type { PendingAction } from "../agent/pending-action.js";
 import { isAtOrAboveCap } from "../policies/payment-policy.js";
 
@@ -85,25 +85,39 @@ export async function confirmPayInvoice(
   return executeInvoicePayment(stripe, sessionCustomerId, pendingAction.arguments as ResolvedInvoicePaymentArgs);
 }
 
+export type ResolveConfirmableResult =
+  | { kind: "ok"; action: PendingAction<"pay_invoice", ResolvedInvoicePaymentArgs> }
+  | { kind: "not_found" }
+  | { kind: "forbidden" };
+
+// Shared by both the confirm: and cancel: callbacks — peeks (non-destructive), checks the action
+// is a pay_invoice action AND belongs to the confirming chat's own session customerId, and only
+// THEN consumes. An id that fails either check is left completely untouched: a web-side
+// refund/create_invoice action (same shared store), or another customer's pay_invoice action,
+// must not be destroyable just because this session asked about it — whether by tapping Confirm
+// or Cancel. (A prior version checked ownership in cancelPendingAction but not in the confirm:
+// handler — this single shared helper is what keeps the two from silently drifting apart again.)
+export function resolveConfirmablePendingAction(
+  pendingActionId: string,
+  sessionCustomerId: string,
+): ResolveConfirmableResult {
+  const peeked = peekPendingAction(pendingActionId);
+  if (!peeked || peeked.tool !== "pay_invoice") return { kind: "not_found" };
+
+  const args = peeked.arguments as ResolvedInvoicePaymentArgs;
+  if (args.customerId !== sessionCustomerId) return { kind: "forbidden" };
+
+  const consumed = consumePendingAction(pendingActionId);
+  if (!consumed) return { kind: "not_found" }; // defensive: shouldn't happen in single-threaded Node
+  return { kind: "ok", action: consumed as PendingAction<"pay_invoice", ResolvedInvoicePaymentArgs> };
+}
+
 export type CancelResult = "cancelled" | "not_found" | "forbidden";
 
-// Requires the confirming chat's own session customerId, same discipline as confirmPayInvoice —
-// an unlinked chat, or a linked chat that isn't who the pending action was created for, must not
-// be able to affect someone else's pending action (web owner's refund/invoice-creation included,
-// since this shares one global store). Note the id is consumed either way once it's found: the
-// store only exposes a destructive read, so a forbidden attempt still burns the id rather than
-// leaving it untouched — an acceptable tradeoff (the original customer just retries) since no
-// money moves and no unauthorized action succeeds either way.
 export function cancelPendingAction(pendingActionId: string, sessionCustomerId: string): CancelResult {
-  const pendingAction = consumePendingAction(pendingActionId);
-  if (!pendingAction) return "not_found";
-
-  if (pendingAction.tool === "pay_invoice") {
-    const args = pendingAction.arguments as ResolvedInvoicePaymentArgs;
-    if (args.customerId !== sessionCustomerId) return "forbidden";
-  }
-
-  return "cancelled";
+  const resolved = resolveConfirmablePendingAction(pendingActionId, sessionCustomerId);
+  if (resolved.kind === "ok") return "cancelled";
+  return resolved.kind;
 }
 
 export function handoffMessage(result: { amountCents: number; hostedInvoiceUrl: string | null }): string {
@@ -241,14 +255,18 @@ export function startTelegramBot(logger: FastifyBaseLogger): void {
       return;
     }
 
-    const pendingAction = consumePendingAction(ctx.match[1]);
-    if (!pendingAction) {
+    const resolved = resolveConfirmablePendingAction(ctx.match[1], customerId);
+    if (resolved.kind === "not_found") {
       await ctx.reply("That request has expired or was already handled.");
+      return;
+    }
+    if (resolved.kind === "forbidden") {
+      await ctx.reply("That request doesn't belong to you.");
       return;
     }
 
     try {
-      const invoice = await confirmPayInvoice(stripe, pendingAction, customerId);
+      const invoice = await confirmPayInvoice(stripe, resolved.action, customerId);
       await ctx.reply(`✅ Payment of ${formatCents(invoice.amount_paid)} received. Thank you!`);
     } catch (err) {
       // Never relay the raw error to the customer — it could be an AuthorizationError's message

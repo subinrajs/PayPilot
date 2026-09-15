@@ -11,7 +11,7 @@ import { assistantRoutes } from "./assistant.js";
 import { runAssistantTurn } from "../agent/loop.js";
 import { executeRefund } from "../agent/tools/refund.js";
 import { executeInvoiceCreation } from "../agent/tools/invoice-creation.js";
-import { setPendingAction } from "../agent/pending-action-store.js";
+import { peekPendingAction, setPendingAction } from "../agent/pending-action-store.js";
 
 async function buildTestApp() {
   const app = Fastify();
@@ -146,5 +146,49 @@ describe("POST /api/assistant/confirm", () => {
     });
     expect(second.statusCode).toBe(404);
     expect(executeRefund).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a Telegram-originated pay_invoice pending action untouched rather than consuming it", async () => {
+    // Regression test for the ordering bug found by Phase 6's guardrail-auditor pass: this route
+    // must not delete an action it doesn't recognize the tool of just because it was asked about
+    // it — the bot (its rightful owner) must still be able to act on it afterward.
+    setPendingAction({
+      id: "pa_telegram",
+      tool: "pay_invoice",
+      arguments: { invoiceId: "in_1", customerId: "cus_a", amountCents: 45000 },
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/assistant/confirm",
+      payload: { pendingActionId: "pa_telegram", action: "confirm" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(executeRefund).not.toHaveBeenCalled();
+    expect(executeInvoiceCreation).not.toHaveBeenCalled();
+    // Still there — proves this route peeked and rejected without consuming.
+    expect(peekPendingAction("pa_telegram")).not.toBeNull();
+  });
+
+  it("also leaves a pay_invoice id untouched on a cancel request", async () => {
+    setPendingAction({
+      id: "pa_telegram_cancel",
+      tool: "pay_invoice",
+      arguments: { invoiceId: "in_1", customerId: "cus_a", amountCents: 45000 },
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const app = await buildTestApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/assistant/confirm",
+      payload: { pendingActionId: "pa_telegram_cancel", action: "cancel" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(peekPendingAction("pa_telegram_cancel")).not.toBeNull();
   });
 });

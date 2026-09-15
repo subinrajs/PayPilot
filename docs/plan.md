@@ -14,7 +14,7 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 | 4 | Web chat assistant | Done |
 | 5 | Web chat UI | Done |
 | 6 | Telegram bot | Done |
-| 7 | Guardrail/policy test suite | Not started |
+| 7 | Guardrail/policy test suite | Done |
 | 8 | Polish & known limitations | Not started |
 
 ## Phase 1 — Scaffolding & environment
@@ -62,12 +62,12 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 
 ## Phase 7 — Guardrail/policy test suite
 
-- [ ] $2,000 cap boundary tests (just under, exactly at, just over)
-- [ ] Telegram customer scoping tests — a linked chat can't read or act on another customer's invoices
-- [ ] Cross-chat pending-action authorization test — a `pay_invoice` pending action built for customer A, confirmed under customer B's session, fails closed (Phase 6 already has a unit-level version of this in `telegram/bot.test.ts`'s `confirmPayInvoice` suite, since the web and Telegram surfaces share one pending-action store; Phase 7 should confirm it still holds at the system level, not just re-test the same function in isolation)
-- [ ] Confirmation-mismatch rejection tests — confirming a stale, altered, or unknown pending action id fails closed
-- [ ] Fix: `POST /api/assistant/confirm` (`routes/assistant.ts`) consumes a pending-action id from the store *before* checking whether it recognizes that action's `tool` — so a bot-created `pay_invoice` id submitted to the web route gets silently deleted rather than left alone (found by Phase 6's guardrail-auditor pass; low severity, ids are unguessable UUIDs, but worth closing alongside the rest of this phase's confirmation-mismatch work)
-- [ ] `guardrail-auditor` subagent run with no Critical/FAIL findings
+- [x] $2,000 cap boundary tests (just under, exactly at, just over)
+- [x] Telegram customer scoping tests — a linked chat can't read or act on another customer's invoices
+- [x] Cross-chat pending-action authorization test — a `pay_invoice` pending action built for customer A, confirmed under customer B's session, fails closed (Phase 6 already has a unit-level version of this in `telegram/bot.test.ts`'s `confirmPayInvoice` suite, since the web and Telegram surfaces share one pending-action store; Phase 7 should confirm it still holds at the system level, not just re-test the same function in isolation)
+- [x] Confirmation-mismatch rejection tests — confirming a stale, altered, or unknown pending action id fails closed
+- [x] Fix: `POST /api/assistant/confirm` (`routes/assistant.ts`) consumes a pending-action id from the store *before* checking whether it recognizes that action's `tool` — so a bot-created `pay_invoice` id submitted to the web route gets silently deleted rather than left alone (found by Phase 6's guardrail-auditor pass; low severity, ids are unguessable UUIDs, but worth closing alongside the rest of this phase's confirmation-mismatch work)
+- [x] `guardrail-auditor` subagent run with no Critical/FAIL findings
 
 This is the phase the README's "Run tests" section (§7) refers to.
 

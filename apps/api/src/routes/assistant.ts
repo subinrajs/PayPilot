@@ -5,7 +5,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { createStripeClient } from "../stripe.js";
 import { createOpenAIClient } from "../openai.js";
 import { runAssistantTurn } from "../agent/loop.js";
-import { consumePendingAction } from "../agent/pending-action-store.js";
+import { consumePendingAction, peekPendingAction } from "../agent/pending-action-store.js";
 import type { PendingAction } from "../agent/pending-action.js";
 import { executeRefund, type ResolvedRefundArgs } from "../agent/tools/refund.js";
 import { executeInvoiceCreation, type ResolvedInvoiceCreationArgs } from "../agent/tools/invoice-creation.js";
@@ -58,6 +58,15 @@ export async function assistantRoutes(app: FastifyInstance) {
 
     const { pendingActionId, action } = parsed.data;
 
+    // Peeked (not consumed) first — an id this route doesn't recognize the tool of (e.g. a
+    // Telegram-originated "pay_invoice" action, which shares this same store) must be left
+    // completely untouched for its rightful owner, not silently destroyed just because this
+    // route happened to be asked about it.
+    const peeked = peekPendingAction(pendingActionId);
+    if (!peeked || (peeked.tool !== "refund" && peeked.tool !== "create_invoice")) {
+      return reply.status(404).send({ error: "Unknown or expired pending action" });
+    }
+
     // Consumed immediately regardless of confirm/cancel — a pending action is single-use either
     // way, and this is what makes a replayed or double-submitted confirm request a no-op rather
     // than a second execution.
@@ -83,8 +92,10 @@ export async function assistantRoutes(app: FastifyInstance) {
 }
 
 // Only the two owner-facing money-moving tools are reachable here — invoice payment is
-// Telegram-scoped and never produces a pending action this route could see.
-async function executeConfirmedAction(stripe: Stripe, action: PendingAction): Promise<unknown> {
+// Telegram-scoped and never produces a pending action this route could see. Exported (not just
+// used internally) so a cross-cutting test can exercise this real dispatch logic directly — see
+// apps/api/src/guardrails.test.ts.
+export async function executeConfirmedAction(stripe: Stripe, action: PendingAction): Promise<unknown> {
   switch (action.tool) {
     case "refund":
       return executeRefund(stripe, action.arguments as ResolvedRefundArgs);

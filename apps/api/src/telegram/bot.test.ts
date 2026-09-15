@@ -7,11 +7,12 @@ import {
   formatPendingConfirmation,
   handleStart,
   handoffMessage,
+  resolveConfirmablePendingAction,
   startResultMessage,
 } from "./bot.js";
 import { getCustomerId, linkChat } from "./session.js";
 import { createPendingAction } from "../agent/pending-action.js";
-import { setPendingAction } from "../agent/pending-action-store.js";
+import { peekPendingAction, setPendingAction } from "../agent/pending-action-store.js";
 import type { ResolvedInvoicePaymentArgs } from "../agent/tools/invoice-payment.js";
 import type { InvoiceLookupResultItem } from "../agent/tools/invoice-lookup.js";
 import { asStripe, createFakeStripe, fakeCustomer, fakeInvoice } from "../test-support/fake-stripe.js";
@@ -136,7 +137,7 @@ describe("cancelPendingAction", () => {
     expect(cancelPendingAction(action.id, "cus_a")).toBe("cancelled");
   });
 
-  it("refuses to cancel a pending action that belongs to a different customer", () => {
+  it("refuses to cancel a pending action that belongs to a different customer, leaving it untouched", () => {
     const action = createPendingAction<"pay_invoice", ResolvedInvoicePaymentArgs>("pay_invoice", {
       invoiceId: "in_1",
       customerId: "cus_a",
@@ -145,10 +146,65 @@ describe("cancelPendingAction", () => {
     setPendingAction(action);
 
     expect(cancelPendingAction(action.id, "cus_b")).toBe("forbidden");
+    // Unlike Phase 6's version, a forbidden attempt must not consume it — the rightful owner
+    // (cus_a) can still act on it afterward.
+    expect(cancelPendingAction(action.id, "cus_a")).toBe("cancelled");
   });
 
   it("reports not_found for an unknown or already-consumed id", () => {
     expect(cancelPendingAction("does-not-exist", "cus_a")).toBe("not_found");
+  });
+
+  it("reports not_found (not forbidden) for a non-pay_invoice id, leaving it untouched for its own surface", () => {
+    // A web-side refund pending action shares the same global store — the bot must not be able
+    // to affect it at all, and must not learn it exists either (not_found, not forbidden).
+    const refundAction = createPendingAction("refund", { chargeId: "ch_1" });
+    setPendingAction(refundAction);
+
+    expect(cancelPendingAction(refundAction.id, "cus_a")).toBe("not_found");
+    // Still there for routes/assistant.ts to consume — proves it wasn't touched.
+    expect(peekPendingAction(refundAction.id)).not.toBeNull();
+  });
+});
+
+describe("resolveConfirmablePendingAction — shared by both confirm: and cancel:", () => {
+  it("resolves and consumes when the pending action is pay_invoice and belongs to this session", () => {
+    const action = createPendingAction<"pay_invoice", ResolvedInvoicePaymentArgs>("pay_invoice", {
+      invoiceId: "in_1",
+      customerId: "cus_a",
+      amountCents: 45000,
+    });
+    setPendingAction(action);
+
+    const result = resolveConfirmablePendingAction(action.id, "cus_a");
+
+    expect(result).toEqual({ kind: "ok", action });
+    expect(peekPendingAction(action.id)).toBeNull(); // consumed
+  });
+
+  it("refuses a pending action that belongs to a different customer, leaving it untouched — this is the guardrail-auditor's Critical finding, now covered directly rather than only through cancelPendingAction", () => {
+    const action = createPendingAction<"pay_invoice", ResolvedInvoicePaymentArgs>("pay_invoice", {
+      invoiceId: "in_1",
+      customerId: "cus_a",
+      amountCents: 45000,
+    });
+    setPendingAction(action);
+
+    expect(resolveConfirmablePendingAction(action.id, "cus_b")).toEqual({ kind: "forbidden" });
+    // Untouched — cus_a can still resolve (and consume) it afterward.
+    expect(resolveConfirmablePendingAction(action.id, "cus_a").kind).toBe("ok");
+  });
+
+  it("reports not_found (not forbidden) for a non-pay_invoice id, leaving it untouched", () => {
+    const refundAction = createPendingAction("refund", { chargeId: "ch_1" });
+    setPendingAction(refundAction);
+
+    expect(resolveConfirmablePendingAction(refundAction.id, "cus_a")).toEqual({ kind: "not_found" });
+    expect(peekPendingAction(refundAction.id)).not.toBeNull();
+  });
+
+  it("reports not_found for an unknown id", () => {
+    expect(resolveConfirmablePendingAction("does-not-exist", "cus_a")).toEqual({ kind: "not_found" });
   });
 });
 
