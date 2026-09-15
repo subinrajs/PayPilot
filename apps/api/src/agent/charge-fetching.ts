@@ -25,6 +25,7 @@ function toChargeLike(charge: Stripe.Charge): ChargeLike {
   return {
     id: charge.id,
     amountCents: charge.amount,
+    amountRefundedCents: charge.amount_refunded,
     status: charge.status,
     customerName,
     description: charge.description,

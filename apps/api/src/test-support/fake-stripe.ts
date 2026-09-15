@@ -28,6 +28,14 @@ export function createFakeStripe() {
     invoiceItems: {
       create: vi.fn(),
     },
+    testHelpers: {
+      testClocks: {
+        // Defaults to "no test clocks" so tests that don't care about clock-attached customers
+        // (most of them) don't each need to mock this — override with mockReturnValueOnce where
+        // a test specifically needs customers found via a clock.
+        list: vi.fn().mockReturnValue(asyncIterableList([])),
+      },
+    },
   };
   return fake;
 }

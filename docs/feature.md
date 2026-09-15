@@ -8,10 +8,10 @@ The Status/Notes table below is kept in sync with implementation by the `plan-tr
 
 | # | Feature | Actor | Status | Notes |
 |---|---|---|---|---|
-| 1 | Daily summary | Owner | Not started | |
-| 2 | Refund a payment | Owner | Not started | |
-| 3 | Create an invoice | Owner | Not started | |
-| 4 | Compare revenue across periods | Owner | Not started | |
+| 1 | Daily summary | Owner | Done | |
+| 2 | Refund a payment | Owner | Done | |
+| 3 | Create an invoice | Owner | Done | |
+| 4 | Compare revenue across periods | Owner | Done | |
 | 5 | Link Telegram chat to Stripe customer | Customer | Not started | |
 | 6 | View what I owe | Customer | Not started | |
 | 7 | Pay an invoice under the cap | Customer | Not started | |

@@ -11,7 +11,7 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 | 1 | Scaffolding & environment | Done |
 | 2 | Stripe sandbox seed script | Done |
 | 3 | Backend core: tools & Stripe integration | Done |
-| 4 | Web chat assistant | Not started |
+| 4 | Web chat assistant | Done |
 | 5 | Web chat UI | Not started |
 | 6 | Telegram bot | Not started |
 | 7 | Guardrail/policy test suite | Not started |
@@ -28,6 +28,8 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 - [x] `pnpm seed` creates the 4 test customers, a mix of successful/declined payments, and the four invoice states (paid, outstanding under the cap, overdue, at/above the cap) described in `docs/spec.md`
 - [x] Seed script prints the link-token(s) needed to connect a Telegram chat to a seeded customer (see `docs/design.md` open items)
 
+**Known limitation, discovered in Phase 4, to fold into Phase 8's `write-up.md`:** Stripe test clocks do not backdate a `Charge`'s `created` timestamp — it always reflects real wall-clock API-call time regardless of the clock's simulated time. So the "mix of payments... over the last few days" fixture is not actually spread across multiple calendar days; every seeded charge lands on whichever real day/time `pnpm seed` was run. This doesn't affect anything built on top of the seed data (Phase 4 was verified correct against whatever dates the data actually has), but it does mean the fixture can't currently demonstrate a meaningful multi-day "compare revenue across periods" scenario without re-running the seed script on different days. Decision (2026-09-15): leave as-is for now rather than re-engineer the seed script's date handling.
+
 ## Phase 3 — Backend core: tools & Stripe integration
 
 - [x] Stripe client wiring in `apps/api`
@@ -39,10 +41,10 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 
 ## Phase 4 — Web chat assistant
 
-- [ ] `POST /api/assistant` — OpenAI tool-calling loop wired to the Phase 3 tools; read-only tools execute inline, money-moving tools return a pending action
-- [ ] `POST /api/assistant/confirm` — validates the pending action id/arguments match, then calls the matching tool's `execute*` (which re-applies the cap check for invoice payment specifically — refund and invoice creation have no cap, per `docs/feature.md`) on a match
-- [ ] Zod validation on tool arguments and the confirm payload
-- [ ] Manual verification via curl/Postman before building the UI in front of it
+- [x] `POST /api/assistant` — OpenAI tool-calling loop wired to the Phase 3 tools; read-only tools execute inline, money-moving tools return a pending action
+- [x] `POST /api/assistant/confirm` — validates the pending action id/arguments match, then calls the matching tool's `execute*` (which re-applies the cap check for invoice payment specifically — refund and invoice creation have no cap, per `docs/feature.md`) on a match
+- [x] Zod validation on tool arguments and the confirm payload
+- [x] Manual verification via curl/Postman before building the UI in front of it
 
 ## Phase 5 — Web chat UI
 
@@ -70,4 +72,4 @@ This is the phase the README's "Run tests" section (§7) refers to.
 ## Phase 8 — Polish & known limitations
 
 - [ ] README's still-open placeholders (architecture summary, API design summary, dev port, Telegram startup instructions) reconciled against what actually got built in Phases 1–7
-- [ ] `write-up.md` written with the full known-limitations list; summarized back into README §9
+- [ ] `write-up.md` written with the full known-limitations list (including the seed-data date-clustering limitation noted under Phase 2); summarized back into README §9
