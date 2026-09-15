@@ -10,7 +10,7 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 |---|---|---|
 | 1 | Scaffolding & environment | Done |
 | 2 | Stripe sandbox seed script | Done |
-| 3 | Backend core: tools & Stripe integration | Not started |
+| 3 | Backend core: tools & Stripe integration | Done |
 | 4 | Web chat assistant | Not started |
 | 5 | Web chat UI | Not started |
 | 6 | Telegram bot | Not started |
@@ -30,17 +30,17 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 
 ## Phase 3 — Backend core: tools & Stripe integration
 
-- [ ] Stripe client wiring in `apps/api`
-- [ ] `policies/authorization.ts` — server-side customer scoping
-- [ ] `policies/payment-policy.ts` — $2,000 cap check (`amount >= 200000`)
-- [ ] Read-only tool implementations: daily summary, revenue comparison, invoice lookup (deterministic aggregation, no LLM-side arithmetic)
-- [ ] Money-moving tool implementations: refund, invoice creation, invoice payment — unit-tested in isolation, not yet wired to the LLM or an HTTP route
-- [ ] Pending-action/confirmation data shape (id, tool name, arguments, expiry)
+- [x] Stripe client wiring in `apps/api`
+- [x] `policies/authorization.ts` — server-side customer scoping
+- [x] `policies/payment-policy.ts` — $2,000 cap check (`amount >= 200000`)
+- [x] Read-only tool implementations: daily summary, revenue comparison, invoice lookup (deterministic aggregation, no LLM-side arithmetic)
+- [x] Money-moving tool implementations: refund, invoice creation, invoice payment — unit-tested in isolation, not yet wired to the LLM or an HTTP route
+- [x] Pending-action/confirmation data shape (id, tool name, arguments, expiry)
 
 ## Phase 4 — Web chat assistant
 
 - [ ] `POST /api/assistant` — OpenAI tool-calling loop wired to the Phase 3 tools; read-only tools execute inline, money-moving tools return a pending action
-- [ ] `POST /api/assistant/confirm` — validates the pending action id/arguments match, applies the cap check, then executes via Stripe on a match
+- [ ] `POST /api/assistant/confirm` — validates the pending action id/arguments match, then calls the matching tool's `execute*` (which re-applies the cap check for invoice payment specifically — refund and invoice creation have no cap, per `docs/feature.md`) on a match
 - [ ] Zod validation on tool arguments and the confirm payload
 - [ ] Manual verification via curl/Postman before building the UI in front of it
 
