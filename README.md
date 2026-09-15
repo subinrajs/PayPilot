@@ -8,18 +8,18 @@ A business-owner web chat assistant over Stripe — natural-language daily summa
 
 ## 1. Architecture overview
 
-*(Fill in once implementation stabilizes — pull the short version from `docs/design.md` rather than duplicating it in full.)*
+A pnpm workspace with two packages: `apps/web` (the owner's chat UI) and `apps/api` (everything else — the REST API, the LLM tool-calling loop, Stripe integration, and the Telegram bot, all in one process). Stripe is the only system of record; the app persists nothing beyond a single in-memory `telegramChatId → stripeCustomerId` mapping.
 
 - **Frontend:** React + Vite + TypeScript — single-page chat UI
 - **Backend:** Node.js + Fastify + TypeScript — REST API, agent orchestration, Stripe integration
 - **LLM:** OpenAI API, structured tool/function calling — the model reasons and selects tools; it never executes anything directly (see "Core principle" in `docs/design.md`)
 - **Payments:** Stripe Node SDK, test mode only
-- **Telegram bot:** grammY
+- **Telegram bot:** grammY, running in the same process as the API (`apps/api/src/telegram/bot.ts`), calling the same tool implementations in-process rather than over HTTP
 - **Persistence:** none beyond a `telegramChatId → stripeCustomerId` mapping — Stripe is the source of truth for everything else
 
-**Why these choices:** *(one or two sentences per major choice — Fastify over Express, OpenAI over another provider, grammY over node-telegram-bot-api, no database. Link back to `docs/design.md` for the full rationale rather than repeating it here.)*
+**Why these choices:** Fastify over Express for first-class TypeScript ergonomics and built-in JSON-schema validation on the tool-call/pending-action payloads this API mostly exists to validate. OpenAI for its mature structured tool/function-calling support, which the "model never executes directly" principle depends on. grammY over node-telegram-bot-api for a modern, typed middleware API that simplifies the `/start <token>` linking flow. No database, because Stripe already is the system of record for customers, invoices, and payments — the one fact it doesn't hold (which Telegram chat maps to which customer) is small enough for an in-memory map rather than a second, syncable copy of financial data. Full rationale for each: `docs/decisions.md` (ADR-001 through ADR-004).
 
-**API design:** *(Summarize `POST /api/assistant`, `POST /api/assistant/confirm`, `GET /api/health` — see `docs/design.md` "API surface" for the canonical version.)*
+**API design:** Three routes, all in `apps/api/src/routes/`. `POST /api/assistant` takes the owner's chat messages, runs the OpenAI tool-calling loop, and returns either a read-only tool's result (executed immediately) or a **pending action** (id, tool name, resolved arguments, expiry) for anything that moves money. `POST /api/assistant/confirm` confirms or cancels a pending action by id — the backend re-validates the id against its stored pending action (never trusting client-supplied arguments) before calling Stripe, and a stale, altered, or unrecognized id is rejected rather than executed. `GET /api/health` is a liveness check. The Telegram bot never goes through this HTTP surface at all — its grammY handlers call the same tool implementations directly in-process, applying the same confirmation and cap logic. Full detail: `docs/design.md` "API surface."
 
 ---
 
@@ -117,4 +117,10 @@ In the web chat:
 
 ## 9. Known limitations
 
-See `write-up.md` for the full list — summarized here once finalized.
+See `write-up.md` for full detail on each of these:
+
+- Seeded charges all land on the real day `pnpm seed` was run — Stripe test clocks don't backdate a `Charge`'s `created` timestamp, so the fixture can't demonstrate a multi-day revenue comparison from a single seed run.
+- The Telegram chat-to-customer mapping is in-memory only and doesn't survive an API restart.
+- The Telegram link-token is a real Stripe customer id, not a separately issued opaque secret — fine in test mode, would need revisiting for a live account.
+- Stripe test clocks cap at 3 customers each, which is why the seed script batches its 4 customers into more than one clock.
+- The Telegram bot's grammY wiring layer (as opposed to its underlying tool/guardrail logic, which is fully unit-tested) is verified by live manual testing rather than automated tests.

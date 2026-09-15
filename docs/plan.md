@@ -15,7 +15,7 @@ Checkboxes below are only marked done once the corresponding code exists **and**
 | 5 | Web chat UI | Done |
 | 6 | Telegram bot | Done |
 | 7 | Guardrail/policy test suite | Done |
-| 8 | Polish & known limitations | Not started |
+| 8 | Polish & known limitations | Done |
 
 ## Phase 1 — Scaffolding & environment
 
@@ -73,5 +73,5 @@ This is the phase the README's "Run tests" section (§7) refers to.
 
 ## Phase 8 — Polish & known limitations
 
-- [ ] README's still-open placeholders (architecture summary, API design summary, dev port, Telegram startup instructions) reconciled against what actually got built in Phases 1–7
-- [ ] `write-up.md` written with the full known-limitations list (including the seed-data date-clustering limitation noted under Phase 2); summarized back into README §9
+- [x] README's still-open placeholders (architecture summary, API design summary, dev port, Telegram startup instructions) reconciled against what actually got built in Phases 1–7
+- [x] `write-up.md` written with the full known-limitations list (including the seed-data date-clustering limitation noted under Phase 2); summarized back into README §9
