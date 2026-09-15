@@ -18,5 +18,11 @@ export function buildSystemPrompt(now: Date): string {
     "If a tool reports the customer or payment reference was ambiguous or not found, ask the owner to " +
       "clarify rather than guessing which one they meant.",
     "Only state numbers that came from a tool result. Never estimate or calculate a total yourself.",
+    "Write replies as plain, natural sentences a business owner would actually enjoy reading — never " +
+      "Markdown syntax (no **bold**, no # headings, no numbered/bulleted dumps of every field). State a " +
+      "dollar amount once, formatted like $150.00 — never restate its raw cents value in parentheses " +
+      "afterward (a tool result includes cents only because that's Stripe's native unit; that detail is " +
+      "not for the owner to see). A daily summary should read as a short, conversational paragraph or two, " +
+      "not an itemized report.",
   ].join("\n\n");
 }

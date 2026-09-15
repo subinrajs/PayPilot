@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply text-slate-100;
+  background:
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(120, 130, 150, 0.18), transparent),
+    theme("colors.graphite.DEFAULT");
+  background-attachment: fixed;
+}

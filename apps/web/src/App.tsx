@@ -1,14 +1,11 @@
 import { useState } from "react";
 import { type ChatMessage, type PendingAction, confirmPendingAction, sendMessage } from "./api.js";
 import { PendingActionPanel } from "./components/PendingActionPanel.js";
+import { Sidebar } from "./components/Sidebar.js";
+import { MessageList } from "./components/MessageList.js";
+import { ChatInput } from "./components/ChatInput.js";
+import { ErrorBanner } from "./components/ErrorBanner.js";
 import { formatCents } from "./format.js";
-import "./App.css";
-
-function isDisplayable(message: ChatMessage): boolean {
-  if (message.role === "user") return true;
-  if (message.role === "assistant") return typeof message.content === "string" && message.content.length > 0;
-  return false;
-}
 
 export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -34,8 +31,6 @@ export function App() {
       setPendingAction(res.pendingAction);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      // Put the message back in the compose box rather than losing it silently — the failed
-      // send is also still in `messages` as a sent bubble, but the user gets to retry as typed.
       setInput(text);
       setMessages(messages);
     } finally {
@@ -75,49 +70,34 @@ export function App() {
   }
 
   return (
-    <main className="chat">
-      <h1>PayPilot</h1>
+    <div className="flex min-h-screen justify-center p-4 sm:p-8">
+      <div className="flex w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white/[0.04] shadow-2xl ring-1 ring-white/10 md:flex-row">
+        <Sidebar />
 
-      <div className="chat__history">
-        {messages.filter(isDisplayable).map((message, index) => (
-          <div key={index} className={`bubble bubble--${message.role}`}>
-            {message.content}
+        <main className="flex min-h-[70vh] flex-1 flex-col p-5 sm:p-6">
+          <MessageList messages={messages} loading={loading} />
+
+          <div className="mt-3 flex flex-col gap-3">
+            {pendingAction && (
+              <PendingActionPanel action={pendingAction} onConfirm={handleConfirm} onCancel={handleCancel} />
+            )}
+
+            {error && <ErrorBanner message={error} />}
+
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSend}
+              disabled={loading || Boolean(pendingAction)}
+              placeholder={
+                pendingAction
+                  ? "Confirm or cancel the pending action above before sending another message…"
+                  : "Ask about your day, refund a payment, create an invoice…"
+              }
+            />
           </div>
-        ))}
-        {loading && (
-          <div className="bubble bubble--assistant bubble--loading" aria-live="polite">
-            Thinking…
-          </div>
-        )}
+        </main>
       </div>
-
-      {pendingAction && (
-        <PendingActionPanel action={pendingAction} onConfirm={handleConfirm} onCancel={handleCancel} />
-      )}
-
-      {error && (
-        <div className="error-banner" role="alert">
-          {error}
-        </div>
-      )}
-
-      <form className="chat__input" onSubmit={handleSend}>
-        <input
-          type="text"
-          aria-label="Message"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            pendingAction
-              ? "Confirm or cancel the pending action above before sending another message…"
-              : "Ask about your day, refund a payment, create an invoice…"
-          }
-          disabled={loading || Boolean(pendingAction)}
-        />
-        <button type="submit" disabled={loading || Boolean(pendingAction) || !input.trim()}>
-          Send
-        </button>
-      </form>
-    </main>
+    </div>
   );
 }
