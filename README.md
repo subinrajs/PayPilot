@@ -2,7 +2,7 @@
 
 A business-owner web chat assistant over Stripe — natural-language daily summaries, refunds, invoices, and revenue comparisons — plus a Telegram bot that lets external customers view and pay only their own invoices, with a $2,000 payment cap enforced in code.
 
-> Internal design/planning docs live in `docs/` (`intent.md`, `spec.md`, `design.md`, `plan.md`, `feature.md`, `decisions.md`) and `CLAUDE.md` at the root — this README is the setup guide for running the app.
+> Internal design/planning docs live in `docs/` (`intent.md`, `spec.md`, `design.md`, `plan.md`, `feature.md`, `decisions.md`, `onboarding.md`) and `CLAUDE.md` at the root — this README is the quickstart; new to the project? See `docs/onboarding.md` for the detailed, step-by-step version.
 
 ---
 

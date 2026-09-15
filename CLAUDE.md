@@ -93,7 +93,7 @@ Defined in `.claude/agents/`, scoped to this project:
 - **test-runner** — runs `pnpm --filter api test` and reports only failures concisely. Use after changing anything in `policies/`, `agent/`, or `telegram/`.
 - **guardrail-auditor** — adversarially traces the code for each financial guardrail (cap, customer isolation, no LLM-side arithmetic, confirmation-before-mutation) and reports PASS/FAIL per guardrail with exact file/line. Use proactively before considering any phase touching money or customer data done.
 - **code-reviewer** — reviews `git diff` against this file's "Non-negotiable rules" and `docs/design.md`'s security model. Use immediately after writing or modifying code, especially under `policies/` or `agent/`.
-- **plan-tracker** — syncs `docs/plan.md`'s checkboxes/status table and `docs/feature.md`'s Status column against actual repo state. Use after completing a phase or feature.
+- **plan-tracker** — syncs `docs/plan.md`'s checkboxes/status table and `docs/feature.md`'s Status column (across all four item types — Story/Bug/Task/Chore) against actual repo state, and resets `.claude/context/current-feature.md` once the item it names is done. Use after completing a phase, story, bug, task, or chore.
 
 ## Where to look
 
@@ -103,5 +103,6 @@ The docs in `docs/` are the source of truth for intent and scope — read them b
 - `docs/spec.md` — functional scope: actors, capabilities, guardrails, what's explicitly out of scope.
 - `docs/design.md` — architecture, tech-choice rationale, API surface (fuller version of this file's Architecture section).
 - `docs/plan.md` — phased build order.
-- `docs/feature.md` — user-story-level acceptance criteria per capability.
+- `docs/feature.md` — the ongoing work backlog: user stories with acceptance criteria, plus bugs, tasks, and chores logged as they come up (see its own "Maintaining this backlog" section).
 - `docs/decisions.md` — ADRs for individual technical choices (Fastify, OpenAI, grammY, no database, single-process bot, confirmation flow, cap enforcement).
+- `docs/onboarding.md` — comprehensive new-developer setup guide (credentials, install, seed, run, test, backlog workflow, troubleshooting).
