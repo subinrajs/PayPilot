@@ -13,12 +13,20 @@ import {
   proposeInvoiceCreation,
   type InvoiceCreationArgs,
 } from "./tools/invoice-creation.js";
+import {
+  OwnerInvoiceLookupArgsSchema,
+  lookupCustomerInvoices,
+  type OwnerInvoiceLookupArgs,
+} from "./tools/owner-invoice-lookup.js";
 
 // The only place OpenAI function definitions are declared — generated from the same Zod schemas
 // that validate at runtime, so the model is never shown a shape different from what's enforced.
-// Deliberately just these 4 owner tools: `lookupInvoices`/invoice-payment are Telegram-scoped and
-// never reach this loop at all (see docs/design.md — the Telegram bot calls them directly,
-// in-process, bypassing the HTTP surface entirely).
+// Deliberately just these 5 owner tools: invoice-payment is Telegram-scoped and never reaches
+// this loop at all (see docs/design.md — the Telegram bot calls it directly, in-process,
+// bypassing the HTTP surface entirely). get_customer_invoices resolves a customer reference here
+// and then delegates to the same lookupInvoices the Telegram bot uses (see
+// tools/owner-invoice-lookup.ts) — the underlying read is identical, only the customer-id
+// resolution differs (owner: by name/email; Telegram: bound server-side from the chat session).
 export interface ToolRegistryEntry {
   name: string;
   description: string;
@@ -64,6 +72,17 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
       "be a concrete ISO date (resolve relative phrases like 'next Friday' yourself before calling this).",
     parametersSchema: InvoiceCreationArgsSchema,
     handler: (stripe, args) => proposeInvoiceCreation(stripe, args as InvoiceCreationArgs),
+  },
+  {
+    name: "get_customer_invoices",
+    description:
+      "Look up a specific customer's invoices by name/email — status, amount due, due date. Read-only, " +
+      "executes immediately, no confirmation needed. This is the ONLY way to answer whether an invoice " +
+      "exists for a customer, or what one's amount/status/due date is — never answer from memory of an " +
+      "earlier turn in this conversation and never guess, since invoice state can change between messages. " +
+      "Returns a not-found/ambiguous result if the reference didn't resolve to exactly one customer.",
+    parametersSchema: OwnerInvoiceLookupArgsSchema,
+    handler: (stripe, args) => lookupCustomerInvoices(stripe, args as OwnerInvoiceLookupArgs),
   },
 ];
 
