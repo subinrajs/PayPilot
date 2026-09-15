@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import Stripe from "stripe";
-import { executeInvoicePayment, proposeInvoicePayment } from "./invoice-payment.js";
-import { asStripe, createFakeStripe, fakeInvoice } from "../../test-support/fake-stripe.js";
+import { executeInvoicePayment, proposeInvoicePayment } from "../../../src/agent/tools/invoice-payment.js";
+import { asStripe, createFakeStripe, fakeInvoice } from "../../support/fake-stripe.js";
 
 describe("proposeInvoicePayment", () => {
   it("returns a pending action for an owned, unpaid, under-cap invoice", async () => {

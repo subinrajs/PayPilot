@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PAYMENT_CAP_CENTS, PaymentCapExceededError, assertBelowCap, isAtOrAboveCap } from "./payment-policy.js";
+import { PAYMENT_CAP_CENTS, PaymentCapExceededError, assertBelowCap, isAtOrAboveCap } from "../../src/policies/payment-policy.js";
 
 describe("payment-policy", () => {
   it("is under the cap just below the boundary", () => {

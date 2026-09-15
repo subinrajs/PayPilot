@@ -1,20 +1,19 @@
 // Cross-cutting guardrail suite (Phase 7 — README §7's "Run tests" section refers to this file
 // and the suites it draws together). Individual pieces of every guarantee here are already
-// unit-tested in isolation next to the module that implements them (agent/tools/*.test.ts,
-// policies/*.test.ts, telegram/*.test.ts, routes/assistant.test.ts) — this file's job is
-// different: prove the guarantees hold when the real modules interact together (only Stripe is
-// faked), in one discoverable place, rather than trusting that isolated unit tests compose
-// correctly.
+// unit-tested in isolation in the matching test file (agent/tools/*.test.ts, policies/*.test.ts,
+// telegram/*.test.ts, routes/assistant.test.ts) — this file's job is different: prove the
+// guarantees hold when the real modules interact together (only Stripe is faked), in one
+// discoverable place, rather than trusting that isolated unit tests compose correctly.
 import { describe, expect, it } from "vitest";
-import { proposeInvoicePayment, executeInvoicePayment, type ResolvedInvoicePaymentArgs } from "./agent/tools/invoice-payment.js";
-import { lookupInvoices } from "./agent/tools/invoice-lookup.js";
-import { PAYMENT_CAP_CENTS } from "./policies/payment-policy.js";
-import { setPendingAction, peekPendingAction } from "./agent/pending-action-store.js";
-import { createPendingAction } from "./agent/pending-action.js";
-import { executeConfirmedAction } from "./routes/assistant.js";
-import { confirmPayInvoice, cancelPendingAction } from "./telegram/bot.js";
-import { linkChat, getCustomerId } from "./telegram/session.js";
-import { asStripe, createFakeStripe, fakeInvoice } from "./test-support/fake-stripe.js";
+import { proposeInvoicePayment, executeInvoicePayment, type ResolvedInvoicePaymentArgs } from "../src/agent/tools/invoice-payment.js";
+import { lookupInvoices } from "../src/agent/tools/invoice-lookup.js";
+import { PAYMENT_CAP_CENTS } from "../src/policies/payment-policy.js";
+import { setPendingAction, peekPendingAction } from "../src/agent/pending-action-store.js";
+import { createPendingAction } from "../src/agent/pending-action.js";
+import { executeConfirmedAction } from "../src/routes/assistant.js";
+import { confirmPayInvoice, cancelPendingAction } from "../src/telegram/bot.js";
+import { linkChat, getCustomerId } from "../src/telegram/session.js";
+import { asStripe, createFakeStripe, fakeInvoice } from "./support/fake-stripe.js";
 
 describe("guardrail: $2,000 cap, system level (propose -> confirm cycle)", () => {
   it("just under the cap: proposes a payable pending action, and executing it really calls Stripe", async () => {

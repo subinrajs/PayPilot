@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { executeInvoiceCreation, proposeInvoiceCreation } from "./invoice-creation.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCustomer, fakeInvoice } from "../../test-support/fake-stripe.js";
+import { executeInvoiceCreation, proposeInvoiceCreation } from "../../../src/agent/tools/invoice-creation.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCustomer, fakeInvoice } from "../../support/fake-stripe.js";
 
 describe("proposeInvoiceCreation", () => {
   it("returns a pending action when exactly one customer matches", async () => {

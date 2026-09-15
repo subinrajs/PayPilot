@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOOL_REGISTRY, toolDefinitionsForOpenAI } from "./tool-registry.js";
+import { TOOL_REGISTRY, toolDefinitionsForOpenAI } from "../../src/agent/tool-registry.js";
 
 describe("tool-registry", () => {
   it("registers exactly the 5 owner tools — never Telegram-scoped invoice-payment", () => {

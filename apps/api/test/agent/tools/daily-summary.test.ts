@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getDailySummary } from "./daily-summary.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCharge } from "../../test-support/fake-stripe.js";
+import { getDailySummary } from "../../../src/agent/tools/daily-summary.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCharge } from "../../support/fake-stripe.js";
 
 describe("getDailySummary", () => {
   it("fetches charges scoped to the requested day and summarizes them", async () => {

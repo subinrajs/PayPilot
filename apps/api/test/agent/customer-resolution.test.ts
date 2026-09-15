@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findCustomersByReference } from "./customer-resolution.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCustomer } from "../test-support/fake-stripe.js";
+import { findCustomersByReference } from "../../src/agent/customer-resolution.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCustomer } from "../support/fake-stripe.js";
 
 describe("findCustomersByReference", () => {
   it("matches a customer from the plain (clock-less) customer list", () => {

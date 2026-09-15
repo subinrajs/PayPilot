@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getRevenueComparison } from "./revenue-comparison.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCharge } from "../../test-support/fake-stripe.js";
+import { getRevenueComparison } from "../../../src/agent/tools/revenue-comparison.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCharge } from "../../support/fake-stripe.js";
 
 describe("getRevenueComparison", () => {
   it("fetches both periods and returns their computed comparison", async () => {

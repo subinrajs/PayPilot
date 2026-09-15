@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { lookupInvoices } from "./invoice-lookup.js";
-import { asStripe, createFakeStripe, fakeInvoice } from "../../test-support/fake-stripe.js";
+import { lookupInvoices } from "../../../src/agent/tools/invoice-lookup.js";
+import { asStripe, createFakeStripe, fakeInvoice } from "../../support/fake-stripe.js";
 
 describe("lookupInvoices", () => {
   it("scopes the Stripe list call to the given customer id", async () => {

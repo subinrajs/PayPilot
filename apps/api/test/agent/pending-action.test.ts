@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PENDING_ACTION_TTL_MS, createPendingAction } from "./pending-action.js";
+import { PENDING_ACTION_TTL_MS, createPendingAction } from "../../src/agent/pending-action.js";
 
 describe("pending-action", () => {
   it("stamps a unique id, the tool name, the arguments, and a future expiry", () => {

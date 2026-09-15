@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AuthorizationError, assertOwnedByCustomer, scopeListParams } from "./authorization.js";
+import { AuthorizationError, assertOwnedByCustomer, scopeListParams } from "../../src/policies/authorization.js";
 
 describe("authorization", () => {
   it("passes when the resource's customer id (string form) matches", () => {

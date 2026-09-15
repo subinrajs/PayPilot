@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { runAssistantTurn } from "./loop.js";
-import { consumePendingAction } from "./pending-action-store.js";
-import { asOpenAI, completionOf, createFakeOpenAI, toolCall } from "../test-support/fake-openai.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCharge, fakeCustomer } from "../test-support/fake-stripe.js";
+import { runAssistantTurn } from "../../src/agent/loop.js";
+import { consumePendingAction } from "../../src/agent/pending-action-store.js";
+import { asOpenAI, completionOf, createFakeOpenAI, toolCall } from "../support/fake-openai.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCharge, fakeCustomer } from "../support/fake-stripe.js";
 
 describe("runAssistantTurn", () => {
   it("returns the model's reply directly when it makes no tool calls", async () => {

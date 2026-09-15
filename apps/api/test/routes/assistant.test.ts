@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 
-vi.mock("../stripe.js", () => ({ createStripeClient: () => ({}) }));
-vi.mock("../openai.js", () => ({ createOpenAIClient: () => ({}), OPENAI_MODEL: "test-model" }));
-vi.mock("../agent/loop.js", () => ({ runAssistantTurn: vi.fn() }));
-vi.mock("../agent/tools/refund.js", () => ({ executeRefund: vi.fn() }));
-vi.mock("../agent/tools/invoice-creation.js", () => ({ executeInvoiceCreation: vi.fn() }));
+vi.mock("../../src/stripe.js", () => ({ createStripeClient: () => ({}) }));
+vi.mock("../../src/openai.js", () => ({ createOpenAIClient: () => ({}), OPENAI_MODEL: "test-model" }));
+vi.mock("../../src/agent/loop.js", () => ({ runAssistantTurn: vi.fn() }));
+vi.mock("../../src/agent/tools/refund.js", () => ({ executeRefund: vi.fn() }));
+vi.mock("../../src/agent/tools/invoice-creation.js", () => ({ executeInvoiceCreation: vi.fn() }));
 
-import { assistantRoutes } from "./assistant.js";
-import { runAssistantTurn } from "../agent/loop.js";
-import { executeRefund } from "../agent/tools/refund.js";
-import { executeInvoiceCreation } from "../agent/tools/invoice-creation.js";
-import { peekPendingAction, setPendingAction } from "../agent/pending-action-store.js";
+import { assistantRoutes } from "../../src/routes/assistant.js";
+import { runAssistantTurn } from "../../src/agent/loop.js";
+import { executeRefund } from "../../src/agent/tools/refund.js";
+import { executeInvoiceCreation } from "../../src/agent/tools/invoice-creation.js";
+import { peekPendingAction, setPendingAction } from "../../src/agent/pending-action-store.js";
 
 async function buildTestApp() {
   const app = Fastify();

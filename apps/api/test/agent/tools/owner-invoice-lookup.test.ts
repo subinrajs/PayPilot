@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { lookupCustomerInvoices } from "./owner-invoice-lookup.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCustomer, fakeInvoice } from "../../test-support/fake-stripe.js";
+import { lookupCustomerInvoices } from "../../../src/agent/tools/owner-invoice-lookup.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCustomer, fakeInvoice } from "../../support/fake-stripe.js";
 
 describe("lookupCustomerInvoices", () => {
   it("resolves a customer reference and returns their invoices", async () => {

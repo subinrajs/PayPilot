@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { executeRefund, proposeRefund } from "./refund.js";
-import { asStripe, asyncIterableList, createFakeStripe, fakeCharge, fakeCustomer } from "../../test-support/fake-stripe.js";
+import { executeRefund, proposeRefund } from "../../../src/agent/tools/refund.js";
+import { asStripe, asyncIterableList, createFakeStripe, fakeCharge, fakeCustomer } from "../../support/fake-stripe.js";
 
 describe("proposeRefund", () => {
   it("returns a pending action when exactly one customer and one refundable charge match", async () => {

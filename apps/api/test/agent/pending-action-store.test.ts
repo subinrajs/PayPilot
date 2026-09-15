@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { consumePendingAction, peekPendingAction, setPendingAction } from "./pending-action-store.js";
-import type { PendingAction } from "./pending-action.js";
+import { consumePendingAction, peekPendingAction, setPendingAction } from "../../src/agent/pending-action-store.js";
+import type { PendingAction } from "../../src/agent/pending-action.js";
 
 function makeAction(overrides: Partial<PendingAction> = {}): PendingAction {
   return {

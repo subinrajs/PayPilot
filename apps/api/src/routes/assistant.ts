@@ -94,7 +94,7 @@ export async function assistantRoutes(app: FastifyInstance) {
 // Only the two owner-facing money-moving tools are reachable here — invoice payment is
 // Telegram-scoped and never produces a pending action this route could see. Exported (not just
 // used internally) so a cross-cutting test can exercise this real dispatch logic directly — see
-// apps/api/src/guardrails.test.ts.
+// apps/api/test/guardrails.test.ts.
 export async function executeConfirmedAction(stripe: Stripe, action: PendingAction): Promise<unknown> {
   switch (action.tool) {
     case "refund":

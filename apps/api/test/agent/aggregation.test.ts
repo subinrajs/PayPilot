@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ChargeLike, compareRevenue, summarizeCharges } from "./aggregation.js";
+import { type ChargeLike, compareRevenue, summarizeCharges } from "../../src/agent/aggregation.js";
 
 function charge(overrides: Partial<ChargeLike>): ChargeLike {
   return {

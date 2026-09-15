@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCustomerId, linkChat } from "./session.js";
+import { getCustomerId, linkChat } from "../../src/telegram/session.js";
 
 describe("session", () => {
   it("links a new chat to a customer", () => {

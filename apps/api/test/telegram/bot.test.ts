@@ -9,13 +9,13 @@ import {
   handoffMessage,
   resolveConfirmablePendingAction,
   startResultMessage,
-} from "./bot.js";
-import { getCustomerId, linkChat } from "./session.js";
-import { createPendingAction } from "../agent/pending-action.js";
-import { peekPendingAction, setPendingAction } from "../agent/pending-action-store.js";
-import type { ResolvedInvoicePaymentArgs } from "../agent/tools/invoice-payment.js";
-import type { InvoiceLookupResultItem } from "../agent/tools/invoice-lookup.js";
-import { asStripe, createFakeStripe, fakeCustomer, fakeInvoice } from "../test-support/fake-stripe.js";
+} from "../../src/telegram/bot.js";
+import { getCustomerId, linkChat } from "../../src/telegram/session.js";
+import { createPendingAction } from "../../src/agent/pending-action.js";
+import { peekPendingAction, setPendingAction } from "../../src/agent/pending-action-store.js";
+import type { ResolvedInvoicePaymentArgs } from "../../src/agent/tools/invoice-payment.js";
+import type { InvoiceLookupResultItem } from "../../src/agent/tools/invoice-lookup.js";
+import { asStripe, createFakeStripe, fakeCustomer, fakeInvoice } from "../support/fake-stripe.js";
 
 describe("handleStart", () => {
   it("links a chat to a valid customer id", async () => {
