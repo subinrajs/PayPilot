@@ -7,6 +7,7 @@ import { findTool, toolDefinitionsForOpenAI } from "./tool-registry.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { setPendingAction } from "./pending-action-store.js";
 import type { PendingAction } from "./pending-action.js";
+import { stripMarkdownArtifacts } from "./markdown-strip.js";
 
 // Caps how many rounds of tool-calling a single request can trigger — this app's tools never
 // need to be chained more than a couple of times, and a cap prevents a misbehaving model from
@@ -48,9 +49,19 @@ export async function runAssistantTurn(
 
     const toolCalls = assistantMessage.tool_calls;
     if (!toolCalls || toolCalls.length === 0) {
+      // A code-level backstop for system-prompt.ts's "never Markdown syntax" rule — the model
+      // doesn't reliably comply (a list-shaped result like multiple invoices reliably biases it
+      // toward Markdown list formatting regardless), and this chat UI only ever renders plain
+      // text, so unstripped Markdown would show up as literal stray characters. Applied to the
+      // message actually returned to the client, not just to `reply`, so the client's own stored
+      // history — which it resends verbatim next turn — is clean too.
+      const cleanedContent = assistantMessage.content ? stripMarkdownArtifacts(assistantMessage.content) : assistantMessage.content;
+      const messages = working.slice(1); // drop the freshly-injected system message
+      messages[messages.length - 1] = { ...assistantMessage, content: cleanedContent };
+
       return {
-        reply: assistantMessage.content ?? "",
-        messages: working.slice(1), // drop the freshly-injected system message
+        reply: cleanedContent ?? "",
+        messages,
         pendingAction,
       };
     }

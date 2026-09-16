@@ -12,6 +12,10 @@ export interface ChargeLike {
   status: "succeeded" | "failed" | "pending";
   customerName: string | null;
   description: string | null;
+  // UTC calendar day the charge was created on (YYYY-MM-DD) — used to bucket charges by day for
+  // the Payment Activity chart (see bucketDailyTotals below). Unused by summarizeCharges/
+  // compareRevenue, but populated on every charge regardless so callers don't need two shapes.
+  date: string;
 }
 
 export interface DailySummary {
@@ -99,4 +103,29 @@ export function compareRevenue(
     previousPeriod.totalCents === 0 ? null : (differenceCents / previousPeriod.totalCents) * 100;
 
   return { current: currentPeriod, previous: previousPeriod, differenceCents, percentChange };
+}
+
+export interface DailyBucket {
+  date: string;
+  // Net of refunds, succeeded charges only — same "revenue kept" meaning as RevenuePeriod's
+  // totalCents, just broken out per day instead of summed across a whole range.
+  totalCents: number;
+}
+
+// `days` is the full list of calendar days to report, oldest first, including ones with zero
+// activity — the Payment Activity chart needs an unbroken day-by-day series, not just the days
+// that happened to have a charge. `charges` may span outside `days`; anything outside is ignored
+// rather than assumed to be a caller error, since the caller (agent/dashboard.ts) fetches by a
+// plain date range and this function is what actually enforces the bucket boundaries.
+export function bucketDailyTotals(charges: ChargeLike[], days: string[]): DailyBucket[] {
+  const totals = new Map<string, number>(days.map((date) => [date, 0]));
+
+  for (const charge of charges) {
+    if (charge.status !== "succeeded") continue;
+    if (!totals.has(charge.date)) continue;
+    const net = charge.amountCents - charge.amountRefundedCents;
+    totals.set(charge.date, totals.get(charge.date)! + net);
+  }
+
+  return days.map((date) => ({ date, totalCents: totals.get(date)! }));
 }

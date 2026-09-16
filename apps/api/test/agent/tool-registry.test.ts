@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TOOL_REGISTRY, toolDefinitionsForOpenAI } from "../../src/agent/tool-registry.js";
 
 describe("tool-registry", () => {
-  it("registers exactly the 5 owner tools — never Telegram-scoped invoice-payment", () => {
+  it("registers exactly the 7 owner tools — never Telegram-scoped invoice-payment", () => {
     const names = TOOL_REGISTRY.map((tool) => tool.name);
     expect(names).toEqual([
       "get_daily_summary",
@@ -10,6 +10,8 @@ describe("tool-registry", () => {
       "propose_refund",
       "propose_invoice_creation",
       "get_customer_invoices",
+      "get_refunds",
+      "get_outstanding_invoices",
     ]);
   });
 

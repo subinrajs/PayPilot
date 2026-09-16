@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ChargeLike, compareRevenue, summarizeCharges } from "../../src/agent/aggregation.js";
+import { type ChargeLike, bucketDailyTotals, compareRevenue, summarizeCharges } from "../../src/agent/aggregation.js";
 
 function charge(overrides: Partial<ChargeLike>): ChargeLike {
   return {
@@ -9,6 +9,7 @@ function charge(overrides: Partial<ChargeLike>): ChargeLike {
     status: "succeeded",
     customerName: "Test Customer",
     description: null,
+    date: "2026-09-14",
     ...overrides,
   };
 }
@@ -105,5 +106,47 @@ describe("compareRevenue", () => {
       { label: "last week", startDate: "c", endDate: "d", charges: [] },
     );
     expect(result.percentChange).toBeNull();
+  });
+});
+
+describe("bucketDailyTotals", () => {
+  it("nets refunds into each day's total, keyed by the charge's own date", () => {
+    const result = bucketDailyTotals(
+      [
+        charge({ date: "2026-09-14", amountCents: 1000 }),
+        charge({ date: "2026-09-14", amountCents: 2000, amountRefundedCents: 500 }),
+        charge({ date: "2026-09-15", amountCents: 4000 }),
+      ],
+      ["2026-09-14", "2026-09-15"],
+    );
+
+    expect(result).toEqual([
+      { date: "2026-09-14", totalCents: 2500 },
+      { date: "2026-09-15", totalCents: 4000 },
+    ]);
+  });
+
+  it("reports zero rather than omitting a day with no activity", () => {
+    const result = bucketDailyTotals([charge({ date: "2026-09-14" })], ["2026-09-13", "2026-09-14", "2026-09-15"]);
+
+    expect(result).toEqual([
+      { date: "2026-09-13", totalCents: 0 },
+      { date: "2026-09-14", totalCents: 1000 },
+      { date: "2026-09-15", totalCents: 0 },
+    ]);
+  });
+
+  it("excludes failed charges from the daily total", () => {
+    const result = bucketDailyTotals([charge({ date: "2026-09-14", status: "failed", amountCents: 9000 })], [
+      "2026-09-14",
+    ]);
+
+    expect(result).toEqual([{ date: "2026-09-14", totalCents: 0 }]);
+  });
+
+  it("ignores a charge whose date falls outside the requested day list", () => {
+    const result = bucketDailyTotals([charge({ date: "2026-01-01", amountCents: 9000 })], ["2026-09-14"]);
+
+    expect(result).toEqual([{ date: "2026-09-14", totalCents: 0 }]);
   });
 });

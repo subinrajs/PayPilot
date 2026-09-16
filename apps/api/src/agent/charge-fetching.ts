@@ -29,7 +29,21 @@ function toChargeLike(charge: Stripe.Charge): ChargeLike {
     status: charge.status,
     customerName,
     description: charge.description,
+    date: new Date(charge.created * 1000).toISOString().slice(0, 10),
   };
+}
+
+// The last `count` UTC calendar days including today, oldest first — e.g. lastNDays(3) on
+// 2026-09-16 returns ["2026-09-14", "2026-09-15", "2026-09-16"]. Shared by anything that needs an
+// unbroken day-by-day series (bucketDailyTotals's `days` argument) rather than just the days that
+// happened to have activity.
+export function lastNDays(count: number, today: Date = new Date()): string[] {
+  const days: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
 }
 
 // Interprets the date at UTC midnight — "today" is a UTC day, not the owner's local timezone.

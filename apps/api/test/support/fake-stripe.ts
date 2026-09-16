@@ -17,6 +17,10 @@ export function createFakeStripe() {
     },
     refunds: {
       create: vi.fn(),
+      // Defaults to "no refunds" so tests that don't care (most of them) don't each need to mock
+      // this — override with mockReturnValueOnce/mockResolvedValueOnce where a test specifically
+      // needs refund data.
+      list: vi.fn().mockReturnValue(asyncIterableList([])),
     },
     invoices: {
       list: vi.fn(),
@@ -27,6 +31,9 @@ export function createFakeStripe() {
     },
     invoiceItems: {
       create: vi.fn(),
+    },
+    disputes: {
+      list: vi.fn().mockReturnValue(asyncIterableList([])),
     },
     testHelpers: {
       testClocks: {
@@ -82,8 +89,23 @@ export function fakeCharge(overrides: Partial<Stripe.Charge> = {}): Stripe.Charg
     amount_refunded: 0,
     description: null,
     created: Math.floor(Date.now() / 1000),
+    billing_details: { name: null, email: null, phone: null, address: null },
     ...overrides,
   } as Stripe.Charge;
+}
+
+export function fakeDispute(overrides: Partial<Stripe.Dispute> = {}): Stripe.Dispute {
+  return {
+    id: "dp_fake",
+    object: "dispute",
+    amount: 1000,
+    currency: "usd",
+    charge: "ch_fake",
+    reason: "general",
+    status: "needs_response",
+    evidence_details: { due_by: null, has_evidence: false, past_due: false, submission_count: 0 },
+    ...overrides,
+  } as Stripe.Dispute;
 }
 
 export function fakeInvoice(overrides: Partial<Stripe.Invoice> = {}): Stripe.Invoice {

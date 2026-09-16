@@ -18,10 +18,16 @@ import {
   lookupCustomerInvoices,
   type OwnerInvoiceLookupArgs,
 } from "./tools/owner-invoice-lookup.js";
+import { RefundLookupArgsSchema, lookupRefunds, type RefundLookupArgs } from "./tools/refund-lookup.js";
+import {
+  OutstandingInvoicesArgsSchema,
+  getOutstandingInvoices,
+  type OutstandingInvoicesArgs,
+} from "./tools/outstanding-invoices.js";
 
 // The only place OpenAI function definitions are declared — generated from the same Zod schemas
 // that validate at runtime, so the model is never shown a shape different from what's enforced.
-// Deliberately just these 5 owner tools: invoice-payment is Telegram-scoped and never reaches
+// Deliberately just these 7 owner tools: invoice-payment is Telegram-scoped and never reaches
 // this loop at all (see docs/design.md — the Telegram bot calls it directly, in-process,
 // bypassing the HTTP surface entirely). get_customer_invoices resolves a customer reference here
 // and then delegates to the same lookupInvoices the Telegram bot uses (see
@@ -83,6 +89,33 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
       "Returns a not-found/ambiguous result if the reference didn't resolve to exactly one customer.",
     parametersSchema: OwnerInvoiceLookupArgsSchema,
     handler: (stripe, args) => lookupCustomerInvoices(stripe, args as OwnerInvoiceLookupArgs),
+  },
+  {
+    name: "get_refunds",
+    description:
+      "List refunds issued account-wide (across every customer) within a date range, with each refund's " +
+      "amount and the customer it belongs to. Read-only, executes immediately. This is the ONLY way to " +
+      "answer a question about past refunds — never answer from memory of an earlier turn, and never " +
+      "confuse this with propose_refund, which creates a NEW refund rather than listing existing ones. " +
+      "IMPORTANT: endDate is EXCLUSIVE — a range covering Sep 1 through Sep 7 inclusive must be passed as " +
+      "startDate: '2026-09-01', endDate: '2026-09-08'.",
+    parametersSchema: RefundLookupArgsSchema,
+    handler: (stripe, args) => lookupRefunds(stripe, args as RefundLookupArgs),
+  },
+  {
+    name: "get_outstanding_invoices",
+    description:
+      "List unpaid invoices account-wide, across EVERY customer at once, with each invoice's amount, " +
+      "status, and which customer it belongs to. Use this for account-wide questions like 'any outstanding " +
+      "invoices?', 'who owes us money right now?', or 'what's overdue?' — NOT for a specific customer's " +
+      "invoices (use get_customer_invoices for that instead). Read-only, executes immediately. Never pass a " +
+      "generic word like 'all' or 'every customer' as a customerReference to get_customer_invoices to try " +
+      "to answer an account-wide question — it will never resolve, since that tool only looks up one " +
+      "specific customer by name or email; call this tool instead. Defaults to status 'open' (everything " +
+      "currently unpaid, which already includes overdue ones) when not specified; pass 'overdue' to narrow " +
+      "to only those already past their due date.",
+    parametersSchema: OutstandingInvoicesArgsSchema,
+    handler: (stripe, args) => getOutstandingInvoices(stripe, args as OutstandingInvoicesArgs),
   },
 ];
 

@@ -7,7 +7,97 @@
 export interface ChatMessage {
   role: "user" | "assistant" | "tool";
   content?: string | null;
+  // Present on an assistant message that called a tool (content is usually null in that case);
+  // used client-side only to identify which tool a later role:"tool" message's result came from
+  // — see toolResults.ts.
+  tool_calls?: { id: string; function: { name: string; arguments: string } }[];
+  // Present on a role:"tool" message — links it back to the tool_calls entry that produced it.
+  tool_call_id?: string;
   [key: string]: unknown;
+}
+
+// Mirrors apps/api/src/agent/aggregation.ts's DailySummary/RevenueComparison and
+// apps/api/src/agent/tools/owner-invoice-lookup.ts's result shape by hand — the web package
+// doesn't import from apps/api, same as PendingAction's arg types just below.
+export interface ChargeLike {
+  id: string;
+  amountCents: number;
+  amountRefundedCents: number;
+  status: "succeeded" | "failed" | "pending";
+  customerName: string | null;
+  description: string | null;
+}
+
+export interface DailySummary {
+  date: string;
+  succeededCount: number;
+  succeededTotalCents: number;
+  refundedTotalCents: number;
+  netTotalCents: number;
+  failedCount: number;
+  charges: ChargeLike[];
+}
+
+export interface RevenuePeriod {
+  label: string;
+  startDate: string;
+  endDate: string;
+  totalCents: number;
+  grossCents: number;
+  refundedCents: number;
+  chargeCount: number;
+}
+
+export interface RevenueComparison {
+  current: RevenuePeriod;
+  previous: RevenuePeriod;
+  differenceCents: number;
+  percentChange: number | null;
+}
+
+export interface InvoiceLookupResultItem {
+  id: string;
+  amountDueCents: number;
+  status: string;
+  dueDate: string | null;
+  overdue: boolean;
+  description: string | null;
+  hostedInvoiceUrl: string | null;
+}
+
+export interface CustomerInvoicesFound {
+  kind: "found";
+  customerName: string;
+  invoices: InvoiceLookupResultItem[];
+}
+
+// Mirrors apps/api/src/agent/tools/outstanding-invoices.ts's result shape by hand.
+export interface OutstandingInvoiceItem extends InvoiceLookupResultItem {
+  customerName: string;
+}
+
+export interface OutstandingInvoicesResult {
+  status: string;
+  count: number;
+  totalCents: number;
+  invoices: OutstandingInvoiceItem[];
+}
+
+// Mirrors apps/api/src/agent/tools/refund-lookup.ts's result shape by hand, same as
+// CustomerInvoicesFound above.
+export interface RefundLookupItem {
+  id: string;
+  amountCents: number;
+  customerName: string | null;
+  createdAt: string;
+}
+
+export interface RefundLookupResult {
+  startDate: string;
+  endDate: string;
+  count: number;
+  totalCents: number;
+  refunds: RefundLookupItem[];
 }
 
 export interface RefundPendingArgs {
@@ -39,6 +129,67 @@ export interface AssistantResponse {
 
 export type ConfirmResult = { status: "cancelled" } | { status: "executed"; result: unknown };
 
+// Mirrors apps/api/src/agent/dashboard.ts's response shapes — the direct, LLM-free dashboard
+// routes (S9). Today's Summary and Payment Activity share the same underlying DailyBucket shape;
+// Payment Activity's is just a longer, user-selectable range of it.
+export interface DailyBucket {
+  date: string;
+  totalCents: number;
+}
+
+export interface TodaysSummary {
+  summary: DailySummary;
+  comparison: RevenueComparison;
+}
+
+export type PaymentActivityRange = 7 | 30 | 90;
+
+export interface PaymentActivity {
+  days: PaymentActivityRange;
+  buckets: DailyBucket[];
+}
+
+export interface OverdueInvoice {
+  id: string;
+  customerName: string;
+  amountDueCents: number;
+  dueDate: string | null;
+}
+
+export interface OverdueInvoicesSummary {
+  count: number;
+  totalCents: number;
+  invoices: OverdueInvoice[];
+}
+
+export interface Dispute {
+  id: string;
+  amountCents: number;
+  reason: string;
+  customerName: string | null;
+  dueBy: string | null;
+}
+
+export interface DisputesSummary {
+  count: number;
+  totalCents: number;
+  disputes: Dispute[];
+}
+
+export type RecentActivityEventType = "payment_succeeded" | "payment_failed" | "refund" | "invoice_created";
+
+export interface RecentActivityEvent {
+  type: RecentActivityEventType;
+  id: string;
+  customerName: string | null;
+  amountCents: number;
+  createdAt: string;
+}
+
+export interface RecentActivity {
+  events: RecentActivityEvent[];
+}
+
 export async function sendMessage(messages: ChatMessage[]): Promise<AssistantResponse> {
   return postJson("/api/assistant", { messages });
 }
@@ -48,6 +199,35 @@ export async function confirmPendingAction(
   action: "confirm" | "cancel",
 ): Promise<ConfirmResult> {
   return postJson("/api/assistant/confirm", { pendingActionId, action });
+}
+
+export async function fetchTodaysSummary(): Promise<TodaysSummary> {
+  return getJson("/api/dashboard/summary");
+}
+
+export async function fetchPaymentActivity(days: PaymentActivityRange): Promise<PaymentActivity> {
+  return getJson(`/api/dashboard/activity?days=${days}`);
+}
+
+export async function fetchOverdueInvoices(): Promise<OverdueInvoicesSummary> {
+  return getJson("/api/dashboard/overdue-invoices");
+}
+
+export async function fetchDisputes(): Promise<DisputesSummary> {
+  return getJson("/api/dashboard/disputes");
+}
+
+export async function fetchRecentActivity(): Promise<RecentActivity> {
+  return getJson("/api/dashboard/recent-activity");
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const parsed = await safeJson(res);
+    throw new Error(parsed?.error ?? `Request to ${url} failed (${res.status})`);
+  }
+  return res.json();
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
