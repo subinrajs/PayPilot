@@ -20,7 +20,7 @@ This document covers *how* the system in `docs/spec.md` gets built: architecture
 
 The LLM's only job is to read the conversation and pick from a fixed set of tools (functions) with fixed, hand-written implementations. The model cannot run arbitrary code or call Stripe itself — every tool is backend code that the model merely selects and supplies arguments for.
 
-For any tool that moves money (refund, invoice payment) or that has a real customer-visible effect (sending an invoice), tool selection and execution are two separate steps:
+For any tool that moves money (refund, invoice payment) or that has a real customer/network-visible effect (sending an invoice, submitting or declining dispute evidence), tool selection and execution are two separate steps:
 
 1. The model selects the tool and proposes arguments. The backend does **not** execute yet — it returns a **pending action** describing what would happen.
 2. The user (owner in web chat, customer in Telegram) explicitly confirms. The backend re-validates the confirmation against the specific pending action it issued — a confirmation that doesn't match the pending action (wrong id, expired, altered amount) is rejected rather than assumed to match.
@@ -28,11 +28,11 @@ For any tool that moves money (refund, invoice payment) or that has a real custo
 
 The $2,000 payment cap is enforced in this same backend code path, before step 3 ever runs — it is a plain conditional on the payment amount, not something the model is asked to respect. An invoice at or above the cap never reaches a payable pending action; it's routed to handoff instead.
 
-Invoice creation (S10, `docs/feature.md`) is a deliberate exception to "the backend does not execute yet": creating the Stripe **draft** invoice itself happens immediately, without a pending action — a draft is safe and fully reversible (no charge, nothing emailed to the customer, deletable), so it's treated like a read-only tool's immediate execution rather than a money-moving one's gated execution. The step that actually matters — **sending** the invoice, which finalizes it and emails the customer — still goes through the full three-step pending-action ceremony above. See ADR-012 in `docs/decisions.md`.
+Invoice creation (S10, `docs/feature.md`) and dispute evidence (S11) are both deliberate exceptions to "the backend does not execute yet": creating the Stripe **draft** invoice, and **staging** dispute evidence (`disputes.update(id, {evidence, submit:false})`), both happen immediately, without a pending action — a draft is safe and fully reversible (no charge, nothing emailed, deletable), and staged evidence is likewise safe and reversible (nothing is sent to the card network until a separate explicit `submit:true`) — so both are treated like a read-only tool's immediate execution rather than a money-moving one's gated execution. The steps that actually matter — **sending** an invoice (finalizes and emails the customer), and **submitting or declining** dispute evidence (sends to the card network, or irreversibly concedes) — still go through the full three-step pending-action ceremony above. See ADR-012 and ADR-013 in `docs/decisions.md`.
 
 Read-only tools (summaries, invoice lookups, revenue comparisons) execute immediately since they can't cause unwanted side effects.
 
-The invoice draft's pre-send review (S10) follows the same "no LLM-side judgment on facts" spirit as the arithmetic rule below: missing-email, overdue-history, unusual-amount, and possible-duplicate checks are plain deterministic code (`agent/tools/invoice-creation.ts`) run against real Stripe data, not something the model is asked to judge — the model only narrates the resulting flags, same as it narrates a daily summary's numbers.
+The invoice draft's pre-send review (S10) and the dispute evidence checklist (S11) both follow the same "no LLM-side judgment on facts" spirit as the arithmetic rule below: missing-email/overdue-history/unusual-amount/possible-duplicate checks (`agent/tools/invoice-creation.ts`), and which dispute-evidence fields are found versus missing (`agent/tools/dispute-response.ts`), are plain deterministic code run against real Stripe data, not something the model is asked to judge — the model only narrates the resulting flags, same as it narrates a daily summary's numbers. For disputes specifically, this also means never fabricating a "found" evidence item — this app has no order/shipping/CRM system, so most evidence beyond payment and customer facts is genuinely either present in Stripe or missing, never guessed.
 
 Two further consequences of this principle:
 
@@ -49,7 +49,8 @@ apps/api/src/
     authorization.ts       # customer scoping — binds customerId server-side from the Telegram session,
                            # never accepted as a tool parameter
   agent/
-    tools/                 # tool implementations: summary, revenue-comparison, refund, invoice draft/review/send, invoice payment, invoice lookup
+    tools/                 # tool implementations: summary, revenue-comparison, refund, invoice draft/review/send,
+                           # dispute evidence checklist/draft/submit/decline, invoice payment, invoice lookup
     loop.ts                 # OpenAI structured tool-calling loop
   telegram/
     bot.ts                  # grammY bot: /start linking, invoice view/pay, handoff at/above the cap
@@ -59,7 +60,7 @@ apps/api/src/
     health.ts                  # GET /api/health
 ```
 
-Every mutating Stripe call for a money-moving action (refund, invoice payment) must pass through `policies/payment-policy.ts` and/or `policies/authorization.ts` — no tool calls Stripe directly for one of these without going through these first. Invoice draft creation/editing/discarding is a mutating Stripe call too, but isn't money-moving (see the draft-vs-send distinction above) and so isn't cap- or authorization-scoped the same way; sending an invoice has no cap check today (the cap governs what's payable through the app's own execution path, not what can be invoiced — same as before this story).
+Every mutating Stripe call for a money-moving action (refund, invoice payment) must pass through `policies/payment-policy.ts` and/or `policies/authorization.ts` — no tool calls Stripe directly for one of these without going through these first. Invoice draft creation/editing/discarding, and dispute evidence staging/submission/decline, are mutating Stripe calls too, but aren't money-moving (see the draft-vs-send / stage-vs-submit distinctions above) and so aren't cap- or authorization-scoped the same way — there is no cap check on invoicing or on dispute responses, since the cap governs what's payable through the app's own execution path, not these other kinds of Stripe writes.
 
 ## Why these choices
 
@@ -80,8 +81,11 @@ Every mutating Stripe call for a money-moving action (refund, invoice payment) m
 - **`GET /api/dashboard/overdue-invoices`** — an aggregate of overdue invoices *across every customer*, for the dashboard's Needs Attention panel. The only dashboard route that scans the full customer list rather than one date range; same LLM-free reasoning.
 - **`GET /api/dashboard/disputes`** — payment disputes still awaiting the owner's evidence response (`needs_response`/`warning_needs_response` only — already-answered or resolved disputes are excluded), for the same Needs Attention panel. First route in this codebase to touch Stripe's Disputes API.
 - **`GET /api/dashboard/recent-activity`** — the 10 most recent account-wide events (successful/failed payments, refunds, invoice creation) merged from three separate Stripe list calls and sorted newest-first, for the dashboard's Recent Activity feed. Deliberately does not also surface "invoice paid" as its own event, since the charge that pays an invoice already appears via the charges stream. Same LLM-free reasoning as the other dashboard routes.
+- **`POST /api/stripe/webhook`** (S13, `docs/feature.md`) — the only route in this codebase that's inbound *from* Stripe rather than outbound *to* it, and the only one requiring the raw, unparsed request body (`stripe.webhooks.constructEvent`'s HMAC signature check needs the exact bytes Stripe signed, not a JSON-reparsed copy) — handled via a content-type parser scoped to this route's own Fastify plugin context, not a global change to body parsing. Deliberately narrow: it only acts on `invoice.paid` events for invoices at/above the $2,000 cap, proactively messaging the linked Telegram customer, since that's the only payment path this app has no other way of learning about (see ADR-015).
+- **`GET /api/dashboard/failed-payments`** (S14, `docs/feature.md`) — currently-failed charges whose invoice (if any) isn't paid, for the same Needs Attention panel. Same LLM-free reasoning as the other dashboard routes.
+- **`POST /api/reminders/send`** (S14) — the first *write* route that bypasses the LLM entirely (see ADR-016): once a payment reminder's text is drafted (by the model) or edited (by the owner), actually sending it needs no reasoning, only logging a fixed string, so the frontend calls this directly rather than routing a finalized string back through a tool call. No Stripe or email SDK call of any kind — logs only, per S14's explicit "simulate, don't configure a real provider" scope.
 
-The Telegram bot does not go through this HTTP surface — grammY handlers call the same underlying tool implementations directly in-process, applying the same confirmation and cap logic described above.
+The Telegram bot does not go through this HTTP surface — grammY handlers call the same underlying tool implementations directly in-process, applying the same confirmation and cap logic described above. Since S12 (`docs/feature.md`), free-text messages in the bot are handled the same way the web chat's `POST /api/assistant` messages are — by `agent/loop.ts`'s `runAssistantTurn` — rather than a second, parallel tool-calling loop: the function takes an optional `{toolRegistry, systemPrompt}` override (defaulting to the owner's `TOOL_REGISTRY`/`buildSystemPrompt`, so the web path's call site is unchanged), and `telegram/bot.ts` passes a customer-scoped registry of exactly two tools (`telegram/tool-registry.ts`) plus a customer-facing prompt (`telegram/system-prompt.ts`). This keeps pending-action storage, Markdown stripping, and the tool-call round cap identical across both entry points by construction, rather than by convention. Confirming a pending action created this way is still exclusively the existing `confirm:`/`cancel:` callback handlers, never a tool the model can call — see ADR-014.
 
 ## Open items for `docs/plan.md` / `docs/decisions.md`
 

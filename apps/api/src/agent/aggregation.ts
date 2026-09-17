@@ -10,7 +10,12 @@ export interface ChargeLike {
   // silently counted as revenue kept, which is wrong.
   amountRefundedCents: number;
   status: "succeeded" | "failed" | "pending";
+  // The real Stripe customer id — used to group charges by customer (rankCustomersByRevenue
+  // below) without the collision risk of grouping by name (two customers can share a display
+  // name; a null/blank name would otherwise merge every nameless customer into one bucket).
+  customerId: string | null;
   customerName: string | null;
+  customerEmail: string | null;
   description: string | null;
   // UTC calendar day the charge was created on (YYYY-MM-DD) — used to bucket charges by day for
   // the Payment Activity chart (see bucketDailyTotals below). Unused by summarizeCharges/
@@ -128,4 +133,41 @@ export function bucketDailyTotals(charges: ChargeLike[], days: string[]): DailyB
   }
 
   return days.map((date) => ({ date, totalCents: totals.get(date)! }));
+}
+
+export interface CustomerRevenueTotal {
+  customerId: string;
+  customerName: string;
+  // Net of refunds, succeeded charges only — same "revenue kept" meaning as RevenuePeriod's
+  // totalCents.
+  totalCents: number;
+  chargeCount: number;
+}
+
+// Grouped by customerId (never by name — two customers can share a display name, and a null name
+// would otherwise merge every nameless customer into a single bucket). Sorted highest total
+// first. Charges with no customer attached (a one-off/guest payment) are excluded — nothing to
+// rank them against.
+export function rankCustomersByRevenue(charges: ChargeLike[]): CustomerRevenueTotal[] {
+  const totals = new Map<string, { customerName: string; totalCents: number; chargeCount: number }>();
+
+  for (const charge of charges) {
+    if (charge.status !== "succeeded" || !charge.customerId) continue;
+    const net = charge.amountCents - charge.amountRefundedCents;
+    const existing = totals.get(charge.customerId);
+    if (existing) {
+      existing.totalCents += net;
+      existing.chargeCount += 1;
+    } else {
+      totals.set(charge.customerId, {
+        customerName: charge.customerName ?? charge.customerEmail ?? charge.customerId,
+        totalCents: net,
+        chargeCount: 1,
+      });
+    }
+  }
+
+  return [...totals.entries()]
+    .map(([customerId, v]) => ({ customerId, ...v }))
+    .sort((a, b) => b.totalCents - a.totalCents);
 }

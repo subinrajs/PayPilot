@@ -6,12 +6,14 @@ import { bucketDailyTotals, type DailyBucket, type DailySummary, type RevenueCom
 import { fetchChargesInRange, isoDateToUnixSeconds, lastNDays } from "./charge-fetching.js";
 import { displayName, listAllCustomers } from "./customer-resolution.js";
 
-// Backs the dashboard's always-visible panels (routes/dashboard.ts) — called directly, never
-// through the OpenAI tool-calling loop. These panels render on page load, before the owner has
-// typed anything, so driving them through the LLM would mean a real API call (cost + latency) for
-// a passive display that needs no narration at all — the deterministic numbers ARE the display.
-// Reuses the exact same tool functions/aggregation the chat surface uses, so there's exactly one
-// implementation of "what today's summary means," not a second copy that could drift.
+// Backs the dashboard's always-visible panels (routes/dashboard.ts) — called directly on page
+// load, before the owner has typed anything, so driving them through the LLM would mean a real
+// API call (cost + latency) for a passive display that needs no narration at all — the
+// deterministic numbers ARE the display. Reuses the exact same tool functions/aggregation the
+// chat surface uses, so there's exactly one implementation of "what today's summary means," not a
+// second copy that could drift. getDisputesSummary is the one exception: S11 also registers it as
+// a read-only chat tool (tool-registry.ts) so the owner can ask "what disputes need attention" in
+// conversation, not just see it passively — safe to reuse as-is since it's pure and read-only.
 
 export interface TodaysSummary {
   summary: DailySummary;
@@ -99,8 +101,9 @@ export interface Dispute {
   id: string;
   amountCents: number;
   reason: string;
-  // Pulled from the disputed charge's billing_details — a real name without needing to expand
-  // (and possibly not find, for a guest/one-off payment) a full Customer object.
+  // Pulled from the disputed charge's billing_details, falling back to the linked Customer's own
+  // name — some test/dispute-triggering payment methods never populate billing_details at all
+  // (confirmed empirically: S11's seeded test disputes), so the fallback isn't just defensive.
   customerName: string | null;
   dueBy: string | null;
 }
@@ -113,28 +116,97 @@ export interface DisputesSummary {
 
 // "Needs attention" means the owner has something to actually do — submit evidence before the
 // deadline. Every other dispute status (already responded, already resolved) doesn't belong on a
-// panel whose whole point is surfacing outstanding action items.
-const DISPUTE_NEEDS_RESPONSE_STATUSES = new Set<Stripe.Dispute.Status>(["needs_response", "warning_needs_response"]);
+// panel whose whole point is surfacing outstanding action items. Exported — S11's
+// agent/tools/dispute-response.ts reuses this same check before staging/submitting/declining, so
+// a dispute that's moved on (won/lost/already under review) can't be acted on as if it still
+// needed a response.
+export const DISPUTE_NEEDS_RESPONSE_STATUSES = new Set<Stripe.Dispute.Status>(["needs_response", "warning_needs_response"]);
 
 export async function getDisputesSummary(stripe: Stripe): Promise<DisputesSummary> {
   const disputes: Dispute[] = [];
 
-  for await (const dispute of stripe.disputes.list({ limit: 100, expand: ["data.charge"] })) {
+  for await (const dispute of stripe.disputes.list({
+    limit: 100,
+    expand: ["data.charge", "data.charge.customer"],
+  })) {
     if (!DISPUTE_NEEDS_RESPONSE_STATUSES.has(dispute.status)) continue;
 
     const charge = typeof dispute.charge === "object" && dispute.charge !== null ? dispute.charge : null;
+    const customer =
+      charge && typeof charge.customer === "object" && charge.customer !== null && !("deleted" in charge.customer && charge.customer.deleted)
+        ? charge.customer
+        : null;
 
     disputes.push({
       id: dispute.id,
       amountCents: dispute.amount,
       reason: dispute.reason,
-      customerName: charge?.billing_details.name ?? null,
+      customerName: charge?.billing_details.name ?? customer?.name ?? null,
       dueBy: dispute.evidence_details.due_by ? new Date(dispute.evidence_details.due_by * 1000).toISOString() : null,
     });
   }
 
   const totalCents = disputes.reduce((sum, dispute) => sum + dispute.amountCents, 0);
   return { count: disputes.length, totalCents, disputes };
+}
+
+export interface FailedPayment {
+  id: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  amountCents: number;
+  failedAt: string;
+  description: string | null;
+  // The associated invoice's own hosted payment page, when one exists — a real, structured link
+  // (ADR-011's existing mechanism) rather than something the model would otherwise have to type
+  // out as free text in a drafted reminder (see S14's payment-reminders.ts).
+  invoiceUrl: string | null;
+}
+
+export interface FailedPaymentsSummary {
+  count: number;
+  totalCents: number;
+  payments: FailedPayment[];
+}
+
+// S14 (docs/feature.md) — a failed charge only stays "needing attention" if the customer hasn't
+// since resolved it another way. Rather than an arbitrary lookback window (which overdue invoices
+// also doesn't have), a failed charge is excluded once its associated invoice (if any) is paid —
+// the same "still genuinely outstanding" reasoning getOverdueInvoicesSummary already applies, just
+// checked via the invoice's current status instead of a due date. A failed charge with no invoice
+// at all (a one-off attempt) has nothing to check against, so it's always included.
+export async function getFailedPaymentsSummary(stripe: Stripe): Promise<FailedPaymentsSummary> {
+  const payments: FailedPayment[] = [];
+
+  // Stripe's charges.list has no status filter param — filtered client-side, same as every other
+  // charge-status check in this codebase (charge-fetching.ts, dashboard.ts's own getRecentActivity).
+  for await (const charge of stripe.charges.list({
+    limit: 100,
+    expand: ["data.customer", "data.invoice"],
+  })) {
+    if (charge.status !== "failed") continue;
+
+    const invoice = typeof charge.invoice === "object" && charge.invoice !== null ? charge.invoice : null;
+    if (invoice && invoice.status === "paid") continue;
+
+    const customer =
+      charge.customer && typeof charge.customer === "object" && !("deleted" in charge.customer && charge.customer.deleted)
+        ? charge.customer
+        : null;
+
+    payments.push({
+      id: charge.id,
+      customerName: charge.billing_details.name ?? customer?.name ?? null,
+      customerEmail: charge.billing_details.email ?? customer?.email ?? null,
+      amountCents: charge.amount,
+      failedAt: new Date(charge.created * 1000).toISOString(),
+      description: charge.description,
+      invoiceUrl: invoice?.hosted_invoice_url ?? null,
+    });
+  }
+
+  const totalCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  return { count: payments.length, totalCents, payments };
 }
 
 export type RecentActivityEventType = "payment_succeeded" | "payment_failed" | "refund" | "invoice_created";

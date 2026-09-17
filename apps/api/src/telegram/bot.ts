@@ -1,14 +1,22 @@
 import { z } from "zod";
 import { Bot, InlineKeyboard } from "grammy";
 import Stripe from "stripe";
+import type OpenAI from "openai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { FastifyBaseLogger } from "fastify";
 import { createStripeClient } from "../stripe.js";
+import { createOpenAIClient } from "../openai.js";
+import { runAssistantTurn } from "../agent/loop.js";
 import { getCustomerId, linkChat, type LinkResult } from "./session.js";
-import { lookupInvoices, type InvoiceLookupResultItem } from "../agent/tools/invoice-lookup.js";
+import { getConversationHistory, setConversationHistory, clearConversationHistory } from "./conversation-store.js";
+import { buildCustomerToolRegistry } from "./tool-registry.js";
+import { buildTelegramSystemPrompt } from "./system-prompt.js";
+import { lookupInvoices, type InvoiceLookupResultItem, type InvoiceLookupResult } from "../agent/tools/invoice-lookup.js";
 import {
   proposeInvoicePayment,
   executeInvoicePayment,
   type ResolvedInvoicePaymentArgs,
+  type ProposeInvoicePaymentResult,
 } from "../agent/tools/invoice-payment.js";
 import { setPendingAction, consumePendingAction, peekPendingAction } from "../agent/pending-action-store.js";
 import type { PendingAction } from "../agent/pending-action.js";
@@ -18,6 +26,15 @@ const LinkTokenSchema = z.string().trim().min(1);
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+// Every reply carrying a handoffMessage/formatInvoiceList result is sent with parse_mode: "HTML"
+// (see the ctx.reply call sites below) so the hosted invoice link can render as friendly text
+// instead of a raw pasted URL — Telegram requires &/</> escaped in the surrounding plain text of
+// an HTML-mode message, hence this helper for the one piece of that text that isn't ours (the
+// invoice description/label, which the owner can set to arbitrary text via invoice-creation.ts).
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // --- Testable core (no grammY Context anywhere below) ------------------------------------
@@ -56,7 +73,7 @@ export async function handleStart(
 export function startResultMessage(result: StartResult): string {
   switch (result) {
     case "linked":
-      return "You're linked! Send /owe to see what you owe.";
+      return "You're all set! 👋 I'm PayPilot, your personal payments assistant. Ask me anything about your account, like what you owe or whether you can pay something — I'm happy to help.";
     case "already_linked_elsewhere":
       return "That link-token is already in use by another chat.";
     case "chat_linked_to_other_customer":
@@ -120,10 +137,13 @@ export function cancelPendingAction(pendingActionId: string, sessionCustomerId: 
   return resolved.kind;
 }
 
+// Renders the hosted invoice link as friendly anchor text rather than a raw pasted URL — sent
+// with parse_mode: "HTML" at every call site below. hostedInvoiceUrl comes straight from Stripe
+// (never owner/customer-supplied free text), so no escaping is needed for the URL itself.
 export function handoffMessage(result: { amountCents: number; hostedInvoiceUrl: string | null }): string {
   const amount = formatCents(result.amountCents);
   return result.hostedInvoiceUrl
-    ? `This invoice (${amount}) is at or above our $2,000 bot limit. You can pay it directly here: ${result.hostedInvoiceUrl}`
+    ? `This invoice (${amount}) is at or above our $2,000 bot limit. You can pay it directly here: <a href="${result.hostedInvoiceUrl}">Pay this invoice</a>`
     : `This invoice (${amount}) is at or above our $2,000 bot limit. Please contact us directly to arrange payment.`;
 }
 
@@ -144,7 +164,9 @@ export function formatInvoiceList(invoices: InvoiceLookupResultItem[]): { text: 
     // not just until existing test data ages out.
     const label = invoice.description ?? "Invoice";
     const overdueNote = invoice.overdue ? " (overdue)" : "";
-    lines.push(`• ${label} — ${formatCents(invoice.amountDueCents)}${overdueNote}`);
+    // Sent with parse_mode: "HTML" (see call sites) — label is free text the owner set at
+    // invoice-creation time, so it must be escaped before landing in an HTML-mode message.
+    lines.push(`• ${escapeHtml(label)} — ${formatCents(invoice.amountDueCents)}${overdueNote}`);
 
     if (isAtOrAboveCap(invoice.amountDueCents)) {
       lines.push(`  ${handoffMessage({ amountCents: invoice.amountDueCents, hostedInvoiceUrl: invoice.hostedInvoiceUrl })}`);
@@ -169,6 +191,94 @@ export function formatPendingConfirmation(
       "This needs your confirmation before anything happens in Stripe.",
     keyboard,
   };
+}
+
+// Scans the given messages for the named tool's most recent result, mirroring the id-linking
+// pattern apps/web/src/toolResults.ts already uses on the web side (reimplemented here since it
+// operates on OpenAI SDK message types, not that file's own hand-rolled ChatMessage shape).
+// Returns the LAST matching result if the tool was called more than once, same "latest reflects
+// what the reply is actually describing" reasoning. Callers MUST pass only the current turn's own
+// messages (see handleConversationalMessage's turnMessages) — passing full conversation history
+// would re-surface a stale result from an earlier turn whenever the model doesn't re-call the tool.
+function findToolResult(messages: ChatCompletionMessageParam[], toolName: string): unknown {
+  const toolNameById = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
+      for (const call of message.tool_calls) {
+        toolNameById.set(call.id, call.function.name);
+      }
+    }
+  }
+
+  let found: unknown;
+  for (const message of messages) {
+    if (message.role !== "tool" || typeof message.content !== "string") continue;
+    if (toolNameById.get(message.tool_call_id) !== toolName) continue;
+    try {
+      found = JSON.parse(message.content);
+    } catch {
+      // Leave `found` as whatever it was — a malformed tool result is simply skipped.
+    }
+  }
+  return found;
+}
+
+export interface ConversationalReply {
+  text: string;
+  invoiceList?: { text: string; keyboard: InlineKeyboard };
+  pendingConfirmation?: { text: string; keyboard: InlineKeyboard };
+  handoff?: string;
+}
+
+// The LLM-based counterpart to the /owe and pay: handlers below — same underlying tools
+// (buildCustomerToolRegistry closes over lookupInvoices/proposeInvoicePayment unchanged), same
+// pending-action store (runAssistantTurn already calls setPendingAction internally whenever a
+// tool returns {kind:"pending"}), same deterministic renders (formatInvoiceList/
+// formatPendingConfirmation/handoffMessage) reused as-is rather than trusting the model's own
+// prose for anything guardrail-sensitive or precisely-worded — the model's own reply stays short
+// and narrative, matching the web chat's "the card already shows it" tile convention.
+export async function handleConversationalMessage(
+  stripe: Stripe,
+  openai: OpenAI,
+  customerId: string,
+  history: ChatCompletionMessageParam[],
+  userText: string,
+): Promise<{ reply: ConversationalReply; messages: ChatCompletionMessageParam[] }> {
+  const nextMessages: ChatCompletionMessageParam[] = [...history, { role: "user", content: userText }];
+  const result = await runAssistantTurn(stripe, openai, nextMessages, {
+    toolRegistry: buildCustomerToolRegistry(customerId),
+    systemPrompt: buildTelegramSystemPrompt(new Date()),
+  });
+
+  // result.messages is the WHOLE accumulated conversation (history + this turn's new messages),
+  // not just what this turn produced — runAssistantTurn returns the full working array minus the
+  // system message. Searching all of it for a tool result would keep re-surfacing a STALE result
+  // from an earlier turn (e.g. an invoice list fetched several messages ago) on every later turn
+  // where the model doesn't call the tool again, even though its own data is long out of date by
+  // then. Slicing to only what's new this turn is what actually gives the "the card already shows
+  // it" guarantee its own doc comment above claims — mirroring the turn-scoping the web frontend's
+  // toolResults.ts already does for the same reason (its dedupeKey mechanism, per S9's B2 fix).
+  const turnMessages = result.messages.slice(nextMessages.length);
+
+  const reply: ConversationalReply = { text: result.reply };
+
+  const invoicesResult = findToolResult(turnMessages, "get_my_invoices") as InvoiceLookupResult | undefined;
+  if (invoicesResult?.invoices) {
+    reply.invoiceList = formatInvoiceList(invoicesResult.invoices);
+  }
+
+  if (result.pendingAction?.tool === "pay_invoice") {
+    reply.pendingConfirmation = formatPendingConfirmation(
+      result.pendingAction as PendingAction<"pay_invoice", ResolvedInvoicePaymentArgs>,
+    );
+  }
+
+  const payResult = findToolResult(turnMessages, "pay_invoice") as ProposeInvoicePaymentResult | undefined;
+  if (payResult?.kind === "handoff") {
+    reply.handoff = handoffMessage(payResult);
+  }
+
+  return { reply, messages: result.messages };
 }
 
 // --- grammY wiring — thin adapters over the testable core above --------------------------
@@ -197,6 +307,11 @@ export function startTelegramBot(logger: FastifyBaseLogger): void {
       return;
     }
     const result = await handleStart(stripe, ctx.chat.id, ctx.chat.type, arg);
+    if (result === "linked") {
+      // Stale history discussing a previous customer's invoices (or a previous link attempt)
+      // must not leak into a freshly-(re)linked chat's next conversational turn.
+      clearConversationHistory(ctx.chat.id);
+    }
     await ctx.reply(startResultMessage(result));
   });
 
@@ -209,10 +324,50 @@ export function startTelegramBot(logger: FastifyBaseLogger): void {
     try {
       const { invoices } = await lookupInvoices(stripe, customerId, { status: "open" });
       const { text, keyboard } = formatInvoiceList(invoices);
-      await ctx.reply(text, { reply_markup: keyboard });
+      await ctx.reply(text, { reply_markup: keyboard, parse_mode: "HTML" });
     } catch (err) {
       logger.error({ err }, "Failed to look up invoices");
       await ctx.reply("Sorry, something went wrong looking up your invoices. Please try again.");
+    }
+  });
+
+  // S12 — anything that isn't /start or /owe (grammY only reaches this once both command matchers
+  // above have already declined the message) is routed through the LLM tool-calling loop instead
+  // of being silently ignored. /start and /owe keep working exactly as before; this is purely
+  // additive. Money actually moves only via the existing confirm: callback below — this handler
+  // can propose a payment (via pay_invoice) but never execute one.
+  bot.on("message:text", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+
+    const text = ctx.message.text.trim();
+    if (text.startsWith("/")) {
+      await ctx.reply("Sorry, I didn't recognize that command.");
+      return;
+    }
+
+    const customerId = getCustomerId(ctx.chat.id);
+    if (!customerId) {
+      await ctx.reply("Please link your account first with /start <token>.");
+      return;
+    }
+
+    try {
+      const openai = createOpenAIClient();
+      const history = getConversationHistory(ctx.chat.id);
+      const { reply, messages } = await handleConversationalMessage(stripe, openai, customerId, history, text);
+      setConversationHistory(ctx.chat.id, messages);
+
+      if (reply.text) await ctx.reply(reply.text);
+      if (reply.invoiceList) {
+        await ctx.reply(reply.invoiceList.text, { reply_markup: reply.invoiceList.keyboard, parse_mode: "HTML" });
+      }
+      if (reply.pendingConfirmation) {
+        await ctx.reply(reply.pendingConfirmation.text, { reply_markup: reply.pendingConfirmation.keyboard });
+      }
+      if (reply.handoff) await ctx.reply(reply.handoff, { parse_mode: "HTML" });
+    } catch (err) {
+      logger.error({ err }, "Failed to handle conversational message");
+      await ctx.reply("Sorry, something went wrong. Please try again.");
     }
   });
 
@@ -234,7 +389,7 @@ export function startTelegramBot(logger: FastifyBaseLogger): void {
         const { text, keyboard } = formatPendingConfirmation(result.action);
         await ctx.reply(text, { reply_markup: keyboard });
       } else if (result.kind === "handoff") {
-        await ctx.reply(handoffMessage(result));
+        await ctx.reply(handoffMessage(result), { parse_mode: "HTML" });
       } else if (result.kind === "already_paid") {
         await ctx.reply("That invoice is already paid.");
       } else {

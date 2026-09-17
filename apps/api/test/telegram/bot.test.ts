@@ -5,6 +5,7 @@ import {
   confirmPayInvoice,
   formatInvoiceList,
   formatPendingConfirmation,
+  handleConversationalMessage,
   handleStart,
   handoffMessage,
   resolveConfirmablePendingAction,
@@ -15,6 +16,7 @@ import { createPendingAction } from "../../src/agent/pending-action.js";
 import { peekPendingAction, setPendingAction } from "../../src/agent/pending-action-store.js";
 import type { ResolvedInvoicePaymentArgs } from "../../src/agent/tools/invoice-payment.js";
 import type { InvoiceLookupResultItem } from "../../src/agent/tools/invoice-lookup.js";
+import { asOpenAI, completionOf, createFakeOpenAI, toolCall } from "../support/fake-openai.js";
 import { asStripe, createFakeStripe, fakeCustomer, fakeInvoice } from "../support/fake-stripe.js";
 
 describe("handleStart", () => {
@@ -223,9 +225,12 @@ describe("startResultMessage", () => {
 });
 
 describe("handoffMessage", () => {
-  it("includes the hosted invoice URL and formatted amount when present", () => {
+  it("renders the hosted invoice URL as a friendly HTML link, not a raw pasted URL", () => {
+    // Sent with parse_mode: "HTML" by every ctx.reply call site — a raw URL in the text is easy
+    // to mis-copy (the bug this was fixed from); an <a> tag gives Telegram a tappable link with
+    // readable anchor text instead.
     const message = handoffMessage({ amountCents: 250000, hostedInvoiceUrl: "https://invoice.stripe.com/i/abc" });
-    expect(message).toContain("https://invoice.stripe.com/i/abc");
+    expect(message).toContain('<a href="https://invoice.stripe.com/i/abc">Pay this invoice</a>');
     expect(message).toContain("$2500.00");
   });
 
@@ -267,6 +272,12 @@ describe("formatInvoiceList", () => {
     expect(text).toContain("bot limit");
     expect(keyboard.inline_keyboard.flat().some((b) => "callback_data" in b && b.callback_data === "pay:in_2")).toBe(false);
   });
+
+  it("escapes HTML special characters in the invoice description — sent with parse_mode: HTML, and the owner can set this text to anything at invoice-creation time", () => {
+    const { text } = formatInvoiceList([invoice({ description: "Consulting <10% off> & travel" })]);
+    expect(text).toContain("Consulting &lt;10% off&gt; &amp; travel");
+    expect(text).not.toContain("<10% off>");
+  });
 });
 
 describe("formatPendingConfirmation", () => {
@@ -281,5 +292,157 @@ describe("formatPendingConfirmation", () => {
     const callbackData = keyboard.inline_keyboard.flat().map((b) => ("callback_data" in b ? b.callback_data : null));
     expect(callbackData).toContain(`confirm:${action.id}`);
     expect(callbackData).toContain(`cancel:${action.id}`);
+  });
+});
+
+describe("handleConversationalMessage — S12's LLM-based free-text handler", () => {
+  it("returns the model's own reply when it makes no tool calls, with no structured card attached", async () => {
+    const stripe = createFakeStripe();
+    const openai = createFakeOpenAI();
+    openai.chat.completions.create.mockResolvedValueOnce(completionOf({ content: "Hi! How can I help?" }));
+
+    const { reply, messages } = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_a", [], "hello");
+
+    expect(reply.text).toBe("Hi! How can I help?");
+    expect(reply.invoiceList).toBeUndefined();
+    expect(reply.pendingConfirmation).toBeUndefined();
+    expect(reply.handoff).toBeUndefined();
+    // Returned messages become next turn's history — must include this turn's user message.
+    expect(messages).toContainEqual({ role: "user", content: "hello" });
+  });
+
+  it("renders get_my_invoices' result via formatInvoiceList — the SAME card /owe produces, not the model's own prose", async () => {
+    const stripe = createFakeStripe();
+    stripe.invoices.list.mockResolvedValueOnce({
+      data: [fakeInvoice({ id: "in_1", customer: "cus_a", amount_due: 45000, status: "open", description: "Q3 services" })],
+    });
+
+    const openai = createFakeOpenAI();
+    const call = toolCall("get_my_invoices", {});
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [call] }))
+      .mockResolvedValueOnce(completionOf({ content: "Here's what you owe." }));
+
+    const { reply } = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_a", [], "what do I owe?");
+
+    expect(reply.invoiceList).toBeDefined();
+    const { text, keyboard } = formatInvoiceList([
+      { id: "in_1", amountDueCents: 45000, status: "open", dueDate: null, overdue: false, description: "Q3 services", hostedInvoiceUrl: "https://invoice.stripe.com/i/fake", createdAt: expect.any(String) as unknown as string },
+    ]);
+    expect(reply.invoiceList!.text).toBe(text);
+    expect(reply.invoiceList!.keyboard.inline_keyboard).toEqual(keyboard.inline_keyboard);
+  });
+
+  it("renders pay_invoice's pending action via formatPendingConfirmation — the SAME Confirm/Cancel card the pay: button callback produces", async () => {
+    const stripe = createFakeStripe();
+    stripe.invoices.retrieve.mockResolvedValueOnce(
+      fakeInvoice({ id: "in_1", customer: "cus_a", amount_due: 45000, paid: false, status: "open" }),
+    );
+
+    const openai = createFakeOpenAI();
+    const call = toolCall("pay_invoice", { invoiceId: "in_1" });
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [call] }))
+      .mockResolvedValueOnce(completionOf({ content: "Sure, here's the confirmation." }));
+
+    const { reply } = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_a", [], "pay that invoice");
+
+    expect(reply.pendingConfirmation).toBeDefined();
+    expect(reply.pendingConfirmation!.text).toContain("$450.00");
+    const callbackData = reply.pendingConfirmation!.keyboard.inline_keyboard
+      .flat()
+      .map((b) => ("callback_data" in b ? b.callback_data : null));
+    expect(callbackData.some((d) => d?.startsWith("confirm:"))).toBe(true);
+    expect(callbackData.some((d) => d?.startsWith("cancel:"))).toBe(true);
+  });
+
+  it("renders a handoff result via handoffMessage when the invoice is at/above the cap", async () => {
+    const stripe = createFakeStripe();
+    stripe.invoices.retrieve.mockResolvedValueOnce(
+      fakeInvoice({ id: "in_1", customer: "cus_a", amount_due: 250000, paid: false, status: "open" }),
+    );
+
+    const openai = createFakeOpenAI();
+    const call = toolCall("pay_invoice", { invoiceId: "in_1" });
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [call] }))
+      .mockResolvedValueOnce(completionOf({ content: "That one's above our bot limit." }));
+
+    const { reply } = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_a", [], "pay the big one");
+
+    expect(reply.handoff).toBeDefined();
+    expect(reply.handoff).toContain("$2500.00");
+    expect(reply.pendingConfirmation).toBeUndefined();
+  });
+
+  it("guardrail: an injected customerId in a mocked pay_invoice tool call is rejected by .strict() rather than honored", async () => {
+    // Simulates an adversarial/malfunctioning model trying to smuggle a different customerId
+    // through the tool-call arguments — pay_invoice's schema has no such field (see
+    // invoice-payment.ts), so this must be rejected as a validation error, never silently
+    // accepted or used to act on someone else's invoice.
+    const stripe = createFakeStripe();
+    const openai = createFakeOpenAI();
+    const call = toolCall("pay_invoice", { invoiceId: "in_1", customerId: "cus_attacker" });
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [call] }))
+      .mockResolvedValueOnce(completionOf({ content: "Sorry, I couldn't process that." }));
+
+    const { reply, messages } = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_bound", [], "pay it");
+
+    expect(reply.pendingConfirmation).toBeUndefined();
+    expect(reply.handoff).toBeUndefined();
+    // Never even reached Stripe — the args failed schema validation before the handler's own logic ran.
+    expect(stripe.invoices.retrieve).not.toHaveBeenCalled();
+
+    const toolResultMessage = messages.find((m) => m.role === "tool");
+    expect(JSON.parse((toolResultMessage as { content: string }).content)).toMatchObject({
+      error: expect.stringContaining("Unrecognized key"),
+    });
+  });
+
+  it("threads the given customerId through, not one from prior history or the tool args", async () => {
+    const stripe = createFakeStripe();
+    stripe.invoices.list.mockResolvedValueOnce({ data: [] });
+
+    const openai = createFakeOpenAI();
+    const call = toolCall("get_my_invoices", {});
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [call] }))
+      .mockResolvedValueOnce(completionOf({ content: "Nothing outstanding." }));
+
+    await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_specific", [], "what do I owe?");
+
+    expect(stripe.invoices.list).toHaveBeenCalledWith(expect.objectContaining({ customer: "cus_specific" }));
+  });
+
+  it("does NOT re-surface a prior turn's stale tool result when the model doesn't call the tool again this turn — regression for a real bug where an already-paid invoice kept showing as owed", async () => {
+    const stripe = createFakeStripe();
+    const openai = createFakeOpenAI();
+
+    // Turn 1: the model calls get_my_invoices and sees one open invoice.
+    stripe.invoices.list.mockResolvedValueOnce({
+      data: [fakeInvoice({ id: "in_stale", customer: "cus_a", amount_due: 50000, status: "open" })],
+    });
+    const firstCall = toolCall("get_my_invoices", {});
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [firstCall] }))
+      .mockResolvedValueOnce(completionOf({ content: "You owe $500." }));
+
+    const first = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_a", [], "what do I owe?");
+    expect(first.reply.invoiceList).toBeDefined();
+
+    // Between turns, that invoice gets paid (e.g. via the bot's own Confirm button) — irrelevant
+    // to this test's point, which is purely about turn 2 not re-narrating turn 1's stale result.
+
+    // Turn 2: the model answers from its own (wrong, stale) belief WITHOUT calling the tool again
+    // — this is the real, observed failure mode (a documented prompt-adherence gap elsewhere in
+    // this project), not something this fix can force the model to avoid. What this fix guarantees
+    // is that the DETERMINISTIC card doesn't also re-render turn 1's now-stale result when that
+    // happens.
+    openai.chat.completions.create.mockResolvedValueOnce(completionOf({ content: "You still owe $500, due soon." }));
+
+    const second = await handleConversationalMessage(asStripe(stripe), asOpenAI(openai), "cus_a", first.messages, "what do I owe?");
+
+    expect(second.reply.invoiceList).toBeUndefined();
   });
 });

@@ -131,6 +131,36 @@ async function customerHasInvoice(customerId: string): Promise<boolean> {
   return invoices.data.length > 0;
 }
 
+// disputes.list has no `customer` filter, so existence is checked the same way
+// getDisputesSummary (agent/dashboard.ts) already scans disputes — via the expanded charge. Cheap
+// at this project's scale (a handful of disputes at most), same ADR-004 reasoning.
+async function customerHasDispute(customerId: string): Promise<boolean> {
+  for await (const dispute of stripe.disputes.list({ limit: 100, expand: ["data.charge"] })) {
+    const charge = typeof dispute.charge === "object" && dispute.charge !== null ? dispute.charge : null;
+    if (charge?.customer === customerId) return true;
+  }
+  return false;
+}
+
+// S11 (docs/feature.md) needs a real dispute to demonstrate the AI dispute assistant against —
+// Stripe's ordinary test charges never generate one on their own. "pm_card_createDisputeProductNotReceived"
+// is Stripe's documented test PaymentMethod for this: the charge succeeds, then Stripe disputes it
+// as "product_not_received" shortly after (asynchronously, not instantly).
+// https://docs.stripe.com/testing#disputes. This needs the PaymentIntents API, unlike the rest of
+// this script's charges (which use the older Charges API with source tokens) — the dispute-
+// triggering payment methods aren't usable through that older API.
+async function createSeedDispute(customerId: string) {
+  await stripe.paymentIntents.create({
+    amount: 89000,
+    currency: "usd",
+    customer: customerId,
+    automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+    payment_method: "pm_card_createDisputeProductNotReceived",
+    confirm: true,
+    description: "Office equipment order",
+  });
+}
+
 // Customers attached to a test clock are NOT returned by a plain `customers.list()` (with or
 // without an `email` filter) — Stripe only returns them when the list call is filtered by that
 // specific test_clock id. Since every seed customer is attached to a clock, checking existence
@@ -290,6 +320,18 @@ async function main() {
       continue;
     }
     await createSeedInvoice(customer.id, INVOICE_PLAN[c.key]);
+  }
+
+  console.log("Creating a test dispute (if not already present)...");
+  const disputeCustomer = CUSTOMERS.find((c) => c.key === "acme")!;
+  if (await customerHasDispute(customers[disputeCustomer.key].id)) {
+    console.log(`  ${disputeCustomer.name}: already has a dispute — skipping`);
+  } else {
+    await createSeedDispute(customers[disputeCustomer.key].id);
+    console.log(
+      `  Triggered a "product not received" test dispute for ${disputeCustomer.name} — Stripe creates it ` +
+        "asynchronously, so it may take a few seconds to appear.",
+    );
   }
 
   console.log("\nSeed complete.\n");

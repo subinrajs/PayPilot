@@ -7,12 +7,14 @@ vi.mock("../../src/agent/dashboard.js", () => ({
   getPaymentActivity: vi.fn(),
   getOverdueInvoicesSummary: vi.fn(),
   getDisputesSummary: vi.fn(),
+  getFailedPaymentsSummary: vi.fn(),
   getRecentActivity: vi.fn(),
 }));
 
 import { dashboardRoutes } from "../../src/routes/dashboard.js";
 import {
   getDisputesSummary,
+  getFailedPaymentsSummary,
   getOverdueInvoicesSummary,
   getPaymentActivity,
   getRecentActivity,
@@ -116,6 +118,28 @@ describe("GET /api/dashboard/disputes", () => {
 
     const app = await buildTestApp();
     const res = await app.inject({ method: "GET", url: "/api/dashboard/disputes" });
+
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).not.toContain("stripe is down");
+  });
+});
+
+describe("GET /api/dashboard/failed-payments", () => {
+  it("returns getFailedPaymentsSummary's result", async () => {
+    vi.mocked(getFailedPaymentsSummary).mockResolvedValueOnce({ count: 1, totalCents: 4000, payments: [] });
+
+    const app = await buildTestApp();
+    const res = await app.inject({ method: "GET", url: "/api/dashboard/failed-payments" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ count: 1, totalCents: 4000, payments: [] });
+  });
+
+  it("returns 502 rather than leaking a raw error when Stripe fails", async () => {
+    vi.mocked(getFailedPaymentsSummary).mockRejectedValueOnce(new Error("stripe is down"));
+
+    const app = await buildTestApp();
+    const res = await app.inject({ method: "GET", url: "/api/dashboard/failed-payments" });
 
     expect(res.statusCode).toBe(502);
     expect(res.json().error).not.toContain("stripe is down");

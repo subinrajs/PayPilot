@@ -4,22 +4,28 @@ import type { ChargeLike } from "./aggregation.js";
 // Shared by daily-summary.ts and revenue-comparison.ts — both fetch charges over a date range and
 // reduce them to the same plain shape aggregation.ts operates on.
 export async function fetchChargesInRange(stripe: Stripe, startSec: number, endSec: number): Promise<ChargeLike[]> {
+  return fetchCharges(stripe, { startSec, endSec });
+}
+
+// Unbounded variant — used by top-customers.ts for an all-time ranking when the owner doesn't ask
+// for a specific date range. `range` omitted means every charge on the account, not just today's.
+export async function fetchCharges(stripe: Stripe, range?: { startSec: number; endSec: number }): Promise<ChargeLike[]> {
+  const params: Stripe.ChargeListParams = { limit: 100, expand: ["data.customer"] };
+  if (range) {
+    params.created = { gte: range.startSec, lt: range.endSec };
+  }
+
   const charges: ChargeLike[] = [];
-  for await (const charge of stripe.charges.list({
-    created: { gte: startSec, lt: endSec },
-    limit: 100,
-    expand: ["data.customer"],
-  })) {
+  for await (const charge of stripe.charges.list(params)) {
     charges.push(toChargeLike(charge));
   }
   return charges;
 }
 
 function toChargeLike(charge: Stripe.Charge): ChargeLike {
-  const customer = charge.customer;
-  const customerName =
-    customer && typeof customer === "object" && !("deleted" in customer && customer.deleted)
-      ? (customer.name ?? null)
+  const customer =
+    charge.customer && typeof charge.customer === "object" && !("deleted" in charge.customer && charge.customer.deleted)
+      ? charge.customer
       : null;
 
   return {
@@ -27,7 +33,9 @@ function toChargeLike(charge: Stripe.Charge): ChargeLike {
     amountCents: charge.amount,
     amountRefundedCents: charge.amount_refunded,
     status: charge.status,
-    customerName,
+    customerId: customer?.id ?? null,
+    customerName: customer?.name ?? null,
+    customerEmail: customer?.email ?? null,
     description: charge.description,
     date: new Date(charge.created * 1000).toISOString().slice(0, 10),
   };

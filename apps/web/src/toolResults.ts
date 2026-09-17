@@ -2,8 +2,10 @@ import type {
   ChatMessage,
   CustomerInvoicesFound,
   DailySummary,
+  DisputeResponse,
   InvoiceDraft,
   OutstandingInvoicesResult,
+  PaymentReminderDraft,
   RefundLookupResult,
   RevenueComparison,
 } from "./api.js";
@@ -15,7 +17,9 @@ export type RenderItem =
   | { kind: "customer-invoices"; key: string; data: CustomerInvoicesFound }
   | { kind: "refunds"; key: string; data: RefundLookupResult }
   | { kind: "outstanding-invoices"; key: string; data: OutstandingInvoicesResult }
-  | { kind: "invoice-draft"; key: string; data: InvoiceDraft };
+  | { kind: "invoice-draft"; key: string; data: InvoiceDraft }
+  | { kind: "dispute-response"; key: string; data: DisputeResponse }
+  | { kind: "payment-reminders"; key: string; data: PaymentReminderDraft };
 
 function isDisplayableMessage(message: ChatMessage): boolean {
   if (message.role === "user") return true;
@@ -91,11 +95,29 @@ function isInvoiceDraft(value: unknown): value is InvoiceDraft {
   );
 }
 
-// Only these seven read-only-or-draft-only tools get structured tiles. propose_refund/
-// send_invoice results are deliberately never matched here — those already surface through
-// PendingActionPanel, driven by the response's separate `pendingAction` field, not by parsing
-// the raw message transcript. create_invoice_draft/update_invoice_draft's ambiguous/not-found
-// variants (no draftInvoiceId) fall through and stay invisible, same as every other tool here.
+function isDisputeResponse(value: unknown): value is DisputeResponse {
+  const v = value as Partial<DisputeResponse> | null;
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    v.kind === "found" &&
+    typeof v.disputeId === "string" &&
+    Array.isArray(v.evidenceFields) &&
+    Array.isArray(v.assessment)
+  );
+}
+
+function isPaymentReminderDraft(value: unknown): value is PaymentReminderDraft {
+  const v = value as Partial<PaymentReminderDraft> | null;
+  return typeof v === "object" && v !== null && Array.isArray(v.reminders) && v.reminders.length > 0;
+}
+
+// Only these ten read-only-or-draft-only tools get structured tiles. propose_refund/send_invoice/
+// submit_dispute_evidence/decline_dispute results are deliberately never matched here — those
+// already surface through PendingActionPanel, driven by the response's separate `pendingAction`
+// field, not by parsing the raw message transcript. create_invoice_draft/update_invoice_draft's
+// and get_dispute_evidence's not-found variants (no draftInvoiceId/disputeId) fall through and
+// stay invisible, same as every other tool here.
 const TILE_TOOLS = new Set([
   "get_daily_summary",
   "get_revenue_comparison",
@@ -104,6 +126,10 @@ const TILE_TOOLS = new Set([
   "get_outstanding_invoices",
   "create_invoice_draft",
   "update_invoice_draft",
+  "get_dispute_evidence",
+  "draft_dispute_response",
+  "update_dispute_response",
+  "draft_payment_reminders",
 ]);
 
 type PendingRenderItem = RenderItem & { turn: number; dedupeKey?: string };
@@ -192,6 +218,32 @@ export function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
             data: parsed,
             turn,
             dedupeKey: `invoice-draft:${parsed.draftInvoiceId}`,
+          });
+          return;
+        }
+        if (
+          (toolName === "get_dispute_evidence" || toolName === "draft_dispute_response" || toolName === "update_dispute_response") &&
+          isDisputeResponse(parsed)
+        ) {
+          items.push({
+            kind: "dispute-response",
+            key: `tool-${index}`,
+            data: parsed,
+            turn,
+            dedupeKey: `dispute-response:${parsed.disputeId}`,
+          });
+          return;
+        }
+        if (toolName === "draft_payment_reminders" && isPaymentReminderDraft(parsed)) {
+          // Single dedupe key, no per-item variation — only one "draft everything currently
+          // outstanding" result makes sense per turn, matching the Needs Attention panel's single
+          // combined "Send Notification" trigger (S14, docs/feature.md).
+          items.push({
+            kind: "payment-reminders",
+            key: `tool-${index}`,
+            data: parsed,
+            turn,
+            dedupeKey: "payment-reminders",
           });
           return;
         }

@@ -3,27 +3,53 @@ import type { PendingAction } from "../api.js";
 import { formatCents } from "../format.js";
 
 export function describePendingAction(action: PendingAction): string {
-  if (action.tool === "refund") {
-    return `Refund ${formatCents(action.arguments.amountCents)} to ${action.arguments.customerName}`;
+  switch (action.tool) {
+    case "refund":
+      return `Refund ${formatCents(action.arguments.amountCents)} to ${action.arguments.customerName}`;
+    case "send_invoice":
+      return (
+        `Send a ${formatCents(action.arguments.totalCents)} invoice to ${action.arguments.customerName}, ` +
+        `due ${action.arguments.dueDate}`
+      );
+    case "submit_dispute_evidence":
+      return `Submit evidence for the ${formatCents(action.arguments.amountCents)} dispute from ${action.arguments.customerName ?? "the customer"}`;
+    case "decline_dispute":
+      return `Decline to contest the ${formatCents(action.arguments.amountCents)} dispute from ${action.arguments.customerName ?? "the customer"}`;
   }
-  return (
-    `Send a ${formatCents(action.arguments.totalCents)} invoice to ${action.arguments.customerName}, ` +
-    `due ${action.arguments.dueDate}`
-  );
 }
 
 function actionLabel(action: PendingAction): string {
-  return action.tool === "refund" ? "Refund" : "Send invoice";
+  switch (action.tool) {
+    case "refund":
+      return "Refund";
+    case "send_invoice":
+      return "Send invoice";
+    case "submit_dispute_evidence":
+      return "Submit dispute evidence";
+    case "decline_dispute":
+      return "Decline dispute";
+  }
+}
+
+function displayCustomerName(action: PendingAction): string {
+  return action.arguments.customerName ?? "Unknown customer";
 }
 
 function displayAmountCents(action: PendingAction): number {
-  return action.tool === "refund" ? action.arguments.amountCents : action.arguments.totalCents;
+  return action.tool === "send_invoice" ? action.arguments.totalCents : action.arguments.amountCents;
 }
 
 function confirmationCopy(action: PendingAction): string {
-  return action.tool === "refund"
-    ? "This action needs your confirmation before anything happens in Stripe."
-    : "The draft is already saved in Stripe — nothing is emailed to the customer until you confirm.";
+  switch (action.tool) {
+    case "refund":
+      return "This action needs your confirmation before anything happens in Stripe.";
+    case "send_invoice":
+      return "The draft is already saved in Stripe — nothing is emailed to the customer until you confirm.";
+    case "submit_dispute_evidence":
+      return "The response is already staged in Stripe — nothing is sent to the card network until you confirm. PayPilot can't guarantee the outcome.";
+    case "decline_dispute":
+      return "This concedes the dispute and cannot be undone once confirmed.";
+  }
 }
 
 interface PendingActionPanelProps {
@@ -53,12 +79,15 @@ export function PendingActionPanel({ action, onConfirm, onCancel }: PendingActio
       <p className="text-xs font-medium uppercase tracking-wide text-slate-300">{actionLabel(action)}</p>
 
       <div className="mt-1.5 flex items-baseline justify-between gap-3">
-        <span className="text-base font-medium text-white">{action.arguments.customerName}</span>
+        <span className="text-base font-medium text-white">{displayCustomerName(action)}</span>
         <span className="whitespace-nowrap text-xl font-semibold text-white">{formatCents(displayAmountCents(action))}</span>
       </div>
 
       {action.tool === "send_invoice" && (
         <p className="mt-1 text-xs text-slate-300">due {action.arguments.dueDate}</p>
+      )}
+      {(action.tool === "submit_dispute_evidence" || action.tool === "decline_dispute") && (
+        <p className="mt-1 text-xs text-slate-300">{action.arguments.reason.replace(/_/g, " ")}</p>
       )}
 
       <p className="mt-2 text-sm text-slate-300">{confirmationCopy(action)}</p>

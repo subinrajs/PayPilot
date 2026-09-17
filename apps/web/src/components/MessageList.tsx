@@ -7,16 +7,18 @@ import { CustomerInvoicesTile } from "./CustomerInvoicesTile.js";
 import { RefundsTile } from "./RefundsTile.js";
 import { OutstandingInvoicesTile } from "./OutstandingInvoicesTile.js";
 import { InvoiceReviewCard } from "./InvoiceReviewCard.js";
+import { DisputeResponseCard } from "./DisputeResponseCard.js";
+import { PaymentReminderCard } from "./PaymentReminderCard.js";
 import { TypingIndicator } from "./TypingIndicator.js";
 
 interface MessageListProps {
   messages: ChatMessage[];
   loading: boolean;
   onSendText: (text: string) => void;
-  onEditInvoiceDraft: () => void;
+  onRequestEdit: (hint: string) => void;
 }
 
-export function MessageList({ messages, loading, onSendText, onEditInvoiceDraft }: MessageListProps) {
+export function MessageList({ messages, loading, onSendText, onRequestEdit }: MessageListProps) {
   const items = buildRenderItems(messages);
 
   return (
@@ -37,8 +39,26 @@ export function MessageList({ messages, loading, onSendText, onEditInvoiceDraft 
             return <OutstandingInvoicesTile key={item.key} data={item.data} />;
           case "invoice-draft":
             return (
-              <InvoiceReviewCard key={item.key} data={item.data} onSendText={onSendText} onEditRequest={onEditInvoiceDraft} />
+              <InvoiceReviewCard
+                key={item.key}
+                data={item.data}
+                onSendText={onSendText}
+                onEditRequest={() => onRequestEdit('Describe what to change, e.g. "make it due in 15 days"…')}
+              />
             );
+          case "dispute-response":
+            return (
+              <DisputeResponseCard
+                key={item.key}
+                data={item.data}
+                onSendText={onSendText}
+                onEditRequest={() =>
+                  onRequestEdit('Describe the evidence you have, e.g. "we shipped it via UPS, tracking 1Z999, delivered Sept 13"…')
+                }
+              />
+            );
+          case "payment-reminders":
+            return <PaymentReminderCard key={item.key} data={item.data} />;
         }
       })}
       {loading && <TypingIndicator />}

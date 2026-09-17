@@ -33,3 +33,15 @@ export function linkChat(chatId: number, customerId: string): LinkResult {
 export function getCustomerId(chatId: number): string | undefined {
   return chatToCustomer.get(chatId);
 }
+
+// S13 (docs/feature.md) — the reverse direction, needed by the Stripe webhook route to find which
+// chat to notify given a paid invoice's customer id. Scans rather than keeping a second index, same
+// reasoning as linkChat's own reverse check above (premature at this scale, and a second piece of
+// state that could drift) — one customer maps to at most one chat by construction (linkChat refuses
+// to link a customerId already linked elsewhere), so the first match is the only match.
+export function getChatIdForCustomer(customerId: string): number | undefined {
+  for (const [chatId, linkedCustomerId] of chatToCustomer.entries()) {
+    if (linkedCustomerId === customerId) return chatId;
+  }
+  return undefined;
+}

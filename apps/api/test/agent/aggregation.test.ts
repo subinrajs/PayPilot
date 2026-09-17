@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type ChargeLike, bucketDailyTotals, compareRevenue, summarizeCharges } from "../../src/agent/aggregation.js";
+import {
+  type ChargeLike,
+  bucketDailyTotals,
+  compareRevenue,
+  rankCustomersByRevenue,
+  summarizeCharges,
+} from "../../src/agent/aggregation.js";
 
 function charge(overrides: Partial<ChargeLike>): ChargeLike {
   return {
@@ -7,7 +13,9 @@ function charge(overrides: Partial<ChargeLike>): ChargeLike {
     amountCents: 1000,
     amountRefundedCents: 0,
     status: "succeeded",
+    customerId: "cus_test",
     customerName: "Test Customer",
+    customerEmail: "test@example.com",
     description: null,
     date: "2026-09-14",
     ...overrides,
@@ -148,5 +156,56 @@ describe("bucketDailyTotals", () => {
     const result = bucketDailyTotals([charge({ date: "2026-01-01", amountCents: 9000 })], ["2026-09-14"]);
 
     expect(result).toEqual([{ date: "2026-09-14", totalCents: 0 }]);
+  });
+});
+
+describe("rankCustomersByRevenue", () => {
+  it("sums net revenue per customer and sorts highest first", () => {
+    const result = rankCustomersByRevenue([
+      charge({ customerId: "cus_a", customerName: "Acme Corp", amountCents: 5000 }),
+      charge({ customerId: "cus_b", customerName: "Maya Rodriguez", amountCents: 20000 }),
+      charge({ customerId: "cus_a", customerName: "Acme Corp", amountCents: 3000 }),
+    ]);
+
+    expect(result).toEqual([
+      { customerId: "cus_b", customerName: "Maya Rodriguez", totalCents: 20000, chargeCount: 1 },
+      { customerId: "cus_a", customerName: "Acme Corp", totalCents: 8000, chargeCount: 2 },
+    ]);
+  });
+
+  it("groups by customer id, not name — two different customers must never merge just because a name matches or is missing", () => {
+    const result = rankCustomersByRevenue([
+      charge({ customerId: "cus_a", customerName: null, customerEmail: null, amountCents: 1000 }),
+      charge({ customerId: "cus_b", customerName: null, customerEmail: null, amountCents: 2000 }),
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(result.map((c) => c.customerId).sort()).toEqual(["cus_a", "cus_b"]);
+  });
+
+  it("falls back to email, then the customer id, when name is missing — never blank", () => {
+    const result = rankCustomersByRevenue([
+      charge({ customerId: "cus_a", customerName: null, customerEmail: "a@example.com" }),
+      charge({ customerId: "cus_b", customerName: null, customerEmail: null }),
+    ]);
+
+    const byId = Object.fromEntries(result.map((c) => [c.customerId, c.customerName]));
+    expect(byId.cus_a).toBe("a@example.com");
+    expect(byId.cus_b).toBe("cus_b");
+  });
+
+  it("excludes failed charges and charges with no customer attached", () => {
+    const result = rankCustomersByRevenue([
+      charge({ customerId: "cus_a", amountCents: 9000, status: "failed" }),
+      charge({ customerId: null, amountCents: 9000 }),
+    ]);
+
+    expect(result).toEqual([]);
+  });
+
+  it("nets refunds out of each customer's total", () => {
+    const result = rankCustomersByRevenue([charge({ customerId: "cus_a", amountCents: 10000, amountRefundedCents: 4000 })]);
+
+    expect(result[0].totalCents).toBe(6000);
   });
 });

@@ -114,9 +114,18 @@ export interface SendInvoicePendingArgs {
   dueDate: string;
 }
 
+export interface DisputeActionPendingArgs {
+  disputeId: string;
+  customerName: string | null;
+  amountCents: number;
+  reason: string;
+}
+
 export type PendingAction =
   | { id: string; tool: "refund"; arguments: RefundPendingArgs; expiresAt: number }
-  | { id: string; tool: "send_invoice"; arguments: SendInvoicePendingArgs; expiresAt: number };
+  | { id: string; tool: "send_invoice"; arguments: SendInvoicePendingArgs; expiresAt: number }
+  | { id: string; tool: "submit_dispute_evidence"; arguments: DisputeActionPendingArgs; expiresAt: number }
+  | { id: string; tool: "decline_dispute"; arguments: DisputeActionPendingArgs; expiresAt: number };
 
 // Mirrors apps/api/src/agent/tools/invoice-creation.ts's InvoiceDraft result shape by hand (S10).
 export interface InvoiceDraftLineItem {
@@ -141,6 +150,52 @@ export interface InvoiceDraft {
   dueDate: string;
   memo: string | null;
   reviewFlags: InvoiceDraftReviewFlag[];
+}
+
+// Mirrors apps/api/src/agent/tools/dispute-response.ts's DisputeResponseFound shape by hand (S11).
+export type EvidenceFieldKey =
+  | "customerName"
+  | "customerEmailAddress"
+  | "billingAddress"
+  | "productDescription"
+  | "shippingCarrier"
+  | "shippingTrackingNumber"
+  | "shippingDate"
+  | "shippingAddress"
+  | "serviceDate"
+  | "accessActivityLog"
+  | "duplicateChargeId"
+  | "duplicateChargeExplanation"
+  | "refundRefusalExplanation"
+  | "cancellationPolicyDisclosure"
+  | "cancellationRebuttal"
+  | "refundPolicyDisclosure"
+  | "narrative";
+
+export interface EvidenceField {
+  key: EvidenceFieldKey;
+  label: string;
+  status: "found" | "missing";
+  value: string | null;
+}
+
+export interface DisputeAssessmentFlag {
+  severity: "ok" | "warning" | "info";
+  label: string;
+}
+
+export interface DisputeResponse {
+  kind: "found";
+  disputeId: string;
+  reason: string;
+  customerName: string | null;
+  amountCents: number;
+  chargeDescription: string | null;
+  dueBy: string | null;
+  evidenceFields: EvidenceField[];
+  narrative: string | null;
+  staged: boolean;
+  assessment: DisputeAssessmentFlag[];
 }
 
 export interface AssistantResponse {
@@ -208,6 +263,43 @@ export interface DisputesSummary {
   disputes: Dispute[];
 }
 
+export interface FailedPayment {
+  id: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  amountCents: number;
+  failedAt: string;
+  description: string | null;
+  invoiceUrl: string | null;
+}
+
+export interface FailedPaymentsSummary {
+  count: number;
+  totalCents: number;
+  payments: FailedPayment[];
+}
+
+export type ReminderTargetType = "overdue_invoice" | "failed_payment";
+
+export interface PaymentReminderItem {
+  targetId: string;
+  targetType: ReminderTargetType;
+  customerName: string;
+  customerEmail: string | null;
+  amountCents: number;
+  invoiceUrl: string | null;
+  subject: string;
+  body: string;
+}
+
+export interface PaymentReminderDraft {
+  reminders: PaymentReminderItem[];
+}
+
+export interface SendRemindersResult {
+  results: { targetId: string; status: "sent" }[];
+}
+
 export type RecentActivityEventType = "payment_succeeded" | "payment_failed" | "refund" | "invoice_created";
 
 export interface RecentActivityEvent {
@@ -251,6 +343,14 @@ export async function fetchDisputes(): Promise<DisputesSummary> {
 
 export async function fetchRecentActivity(): Promise<RecentActivity> {
   return getJson("/api/dashboard/recent-activity");
+}
+
+export async function fetchFailedPayments(): Promise<FailedPaymentsSummary> {
+  return getJson("/api/dashboard/failed-payments");
+}
+
+export async function sendPaymentReminders(reminders: PaymentReminderItem[]): Promise<SendRemindersResult> {
+  return postJson("/api/reminders/send", { reminders });
 }
 
 async function getJson<T>(url: string): Promise<T> {

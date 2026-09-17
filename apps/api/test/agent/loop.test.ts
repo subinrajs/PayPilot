@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { runAssistantTurn } from "../../src/agent/loop.js";
 import { consumePendingAction } from "../../src/agent/pending-action-store.js";
+import type { ToolRegistryEntry } from "../../src/agent/tool-registry.js";
 import { asOpenAI, completionOf, createFakeOpenAI, toolCall } from "../support/fake-openai.js";
 import { asStripe, asyncIterableList, createFakeStripe, fakeCharge, fakeCustomer } from "../support/fake-stripe.js";
 
@@ -165,5 +167,62 @@ describe("runAssistantTurn", () => {
     expect(result.pendingAction).toBeDefined();
     expect(result.pendingAction?.tool).toBe("refund");
     expect(consumePendingAction(result.pendingAction!.id)).not.toBeNull();
+  });
+
+  it("honors a custom toolRegistry/systemPrompt instead of the owner defaults — S12's Telegram bot relies on this", async () => {
+    const customRegistry: ToolRegistryEntry[] = [
+      {
+        name: "get_my_invoices",
+        description: "customer-scoped, not an owner tool",
+        parametersSchema: z.object({}).strict(),
+        handler: async () => ({ invoices: [] }),
+      },
+    ];
+
+    const stripe = createFakeStripe();
+    const openai = createFakeOpenAI();
+    openai.chat.completions.create.mockResolvedValueOnce(completionOf({ content: "You have no invoices." }));
+
+    const result = await runAssistantTurn(asStripe(stripe), asOpenAI(openai), [{ role: "user", content: "what do I owe?" }], {
+      toolRegistry: customRegistry,
+      systemPrompt: "You are a customer-scoped assistant.",
+    });
+
+    expect(result.reply).toBe("You have no invoices.");
+
+    const call = openai.chat.completions.create.mock.calls[0][0];
+    expect(call.messages[0]).toEqual({ role: "system", content: "You are a customer-scoped assistant." });
+    expect(call.tools).toHaveLength(1);
+    expect(call.tools?.[0]).toMatchObject({ function: { name: "get_my_invoices" } });
+    // Proves it's actually a DIFFERENT set of tools, not just a same-length coincidence — none of
+    // the owner-only tool names leaked through.
+    expect(JSON.stringify(call.tools)).not.toContain("propose_refund");
+  });
+
+  it("does not silently swallow a custom registry's own tool name when it collides with an owner tool's — each round resolves against the PASSED registry, never TOOL_REGISTRY", async () => {
+    const customRegistry: ToolRegistryEntry[] = [
+      {
+        name: "get_my_invoices",
+        description: "customer-scoped",
+        parametersSchema: z.object({}).strict(),
+        handler: async () => ({ invoices: [{ id: "in_only_in_custom_registry" }] }),
+      },
+    ];
+
+    const stripe = createFakeStripe();
+    const openai = createFakeOpenAI();
+    const call = toolCall("get_my_invoices", {});
+    openai.chat.completions.create
+      .mockResolvedValueOnce(completionOf({ tool_calls: [call] }))
+      .mockResolvedValueOnce(completionOf({ content: "done" }));
+
+    const result = await runAssistantTurn(asStripe(stripe), asOpenAI(openai), [{ role: "user", content: "hi" }], {
+      toolRegistry: customRegistry,
+    });
+
+    const toolResultMessage = result.messages.find((m) => m.role === "tool");
+    expect(JSON.parse((toolResultMessage as { content: string }).content)).toEqual({
+      invoices: [{ id: "in_only_in_custom_registry" }],
+    });
   });
 });

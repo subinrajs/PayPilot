@@ -39,7 +39,7 @@ Standard Git, any reasonably recent version.
 
 ### Credentials — Stripe, OpenAI, Telegram
 
-You'll need three things before the app is fully runnable. All three are free to obtain; only the OpenAI one requires billing to be enabled on your account before it will actually respond to requests.
+You'll need three things before the app is fully runnable, plus an optional fourth for the payment-webhook notification (S13). All are free to obtain; only the OpenAI one requires billing to be enabled on your account before it will actually respond to requests.
 
 **Stripe (test mode)**
 1. Sign up at [stripe.com](https://stripe.com) (or log in if you already have an account).
@@ -61,6 +61,11 @@ You'll need three things before the app is fully runnable. All three are free to
 4. When asked for a **username**, type something unique that ends in `bot` (e.g. `paypilot_yourname_bot`) — BotFather will tell you if it's taken.
 5. BotFather replies with a token that looks like `123456789:AAExampleTokenValueGoesHere`. This is your `TELEGRAM_BOT_TOKEN`.
 
+**Stripe webhook signing secret** (optional — only needed to test S13's payment-received notification; the rest of the app runs fine without it)
+1. Install the [Stripe CLI](https://docs.stripe.com/stripe-cli) if you don't already have it, and run `stripe login` once.
+2. With the API running locally (`pnpm dev`, see below), run: `stripe listen --forward-to localhost:3000/api/stripe/webhook`.
+3. It prints a signing secret starting with `whsec_...` — that's your `STRIPE_WEBHOOK_SECRET`. Leave this command running in its own terminal while you test; it forwards real test-mode Stripe events to your local server.
+
 ---
 
 ## 2. Clone, install, configure
@@ -79,12 +84,13 @@ Now set up your environment file:
 cp apps/api/.env.example apps/api/.env
 ```
 
-Open `apps/api/.env` and fill in the three keys from step 1:
+Open `apps/api/.env` and fill in the keys from step 1 (`STRIPE_WEBHOOK_SECRET` only if you're testing S13 — leave it blank otherwise):
 
 ```bash
 STRIPE_SECRET_KEY=sk_test_...
 OPENAI_API_KEY=sk-...
 TELEGRAM_BOT_TOKEN=123456789:AAExampleTokenValueGoesHere
+STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
 **Never commit real secrets.** `apps/api/.env` is already gitignored — only `apps/api/.env.example` (which stays empty) is tracked in git. Before any commit, it's worth a quick `git status` glance to make sure `.env` isn't staged and no key value ended up somewhere it shouldn't (a screenshot, a log line, a test fixture).

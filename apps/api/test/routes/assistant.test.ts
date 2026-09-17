@@ -43,6 +43,106 @@ describe("POST /api/assistant", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ reply: "hi", messages: [] });
   });
+
+  describe("deterministic reply override for draft_payment_reminders", () => {
+    // Regression coverage: the model reliably restated every drafted subject/body in prose
+    // despite system-prompt.ts's "one line, the card already shows it" instruction — a real bug
+    // reported live. Prompt wording alone had already failed twice for this exact class of issue
+    // (see S10/S11's own "known minor gap" notes), so the fix is deterministic instead of relying
+    // on the model to comply.
+    function toolCallResult(toolName: string, content: unknown, finalReplyContent: string) {
+      const inputMessages = [{ role: "user", content: "draft reminders" }];
+      return {
+        inputMessages,
+        messages: [
+          ...inputMessages,
+          { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: toolName, arguments: "{}" } }] },
+          { role: "tool", tool_call_id: "call_1", content: JSON.stringify(content) },
+          { role: "assistant", content: finalReplyContent },
+        ],
+      };
+    }
+
+    // The frontend (App.tsx) renders the chat from the response's `messages` array — it calls
+    // `setMessages(res.messages)` on every reply and never reads `res.reply` at all. An earlier
+    // version of this fix only overrode `reply`, which the client silently ignored — these
+    // assertions check `messages`, the field that actually reaches the screen, not just `reply`.
+    function lastMessageContent(res: { json: () => { messages: { role: string; content: unknown }[] } }): unknown {
+      const messages = res.json().messages;
+      return messages[messages.length - 1]?.content;
+    }
+
+    it("replaces the model's own verbose reply with a short deterministic sentence, in BOTH reply and the last message's content", async () => {
+      const { inputMessages, messages } = toolCallResult(
+        "draft_payment_reminders",
+        { reminders: [{ targetId: "in_1" }, { targetId: "ch_1" }] },
+        "verbose model narration restating every draft in full",
+      );
+      vi.mocked(runAssistantTurn).mockResolvedValueOnce({ reply: "verbose model narration restating every draft in full", messages } as never);
+
+      const app = await buildTestApp();
+      const res = await app.inject({ method: "POST", url: "/api/assistant", payload: { messages: inputMessages } });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().reply).toContain("2 payment reminder drafts");
+      expect(lastMessageContent(res)).toContain("2 payment reminder drafts");
+      expect(lastMessageContent(res)).not.toContain("verbose model narration");
+    });
+
+    it("uses singular wording for exactly one reminder", async () => {
+      const { inputMessages, messages } = toolCallResult("draft_payment_reminders", { reminders: [{ targetId: "in_1" }] }, "verbose");
+      vi.mocked(runAssistantTurn).mockResolvedValueOnce({ reply: "verbose", messages } as never);
+
+      const app = await buildTestApp();
+      const res = await app.inject({ method: "POST", url: "/api/assistant", payload: { messages: inputMessages } });
+
+      expect(lastMessageContent(res)).toContain("the payment reminder draft below");
+      expect(lastMessageContent(res)).not.toContain("drafts");
+    });
+
+    it("leaves the model's own reply untouched when draft_payment_reminders was not called this turn", async () => {
+      const { inputMessages, messages } = toolCallResult("get_daily_summary", { succeededTotalCents: 1000 }, "You made $10 today.");
+      vi.mocked(runAssistantTurn).mockResolvedValueOnce({ reply: "You made $10 today.", messages } as never);
+
+      const app = await buildTestApp();
+      const res = await app.inject({ method: "POST", url: "/api/assistant", payload: { messages: inputMessages } });
+
+      expect(res.json().reply).toBe("You made $10 today.");
+      expect(lastMessageContent(res)).toBe("You made $10 today.");
+    });
+
+    it("only considers this turn's own tool calls, never a stale one from earlier history", async () => {
+      // The prior turn already called draft_payment_reminders (present in the resent history);
+      // this turn's own tool call is something else entirely — the override must not fire based
+      // on the OLD call still sitting in the message array.
+      const priorToolCall = {
+        role: "assistant" as const,
+        content: null,
+        tool_calls: [{ id: "call_old", type: "function" as const, function: { name: "draft_payment_reminders", arguments: "{}" } }],
+      };
+      const priorToolResult = { role: "tool" as const, tool_call_id: "call_old", content: JSON.stringify({ reminders: [{ targetId: "in_1" }] }) };
+      const inputMessages = [{ role: "user", content: "draft reminders" }, priorToolCall, priorToolResult, { role: "assistant", content: "ok" }, { role: "user", content: "what did I make today?" }];
+
+      const newToolCall = {
+        role: "assistant" as const,
+        content: null,
+        tool_calls: [{ id: "call_new", type: "function" as const, function: { name: "get_daily_summary", arguments: "{}" } }],
+      };
+      const newToolResult = { role: "tool" as const, tool_call_id: "call_new", content: JSON.stringify({ succeededTotalCents: 1000 }) };
+      const finalReply = { role: "assistant" as const, content: "You made $10 today." };
+
+      vi.mocked(runAssistantTurn).mockResolvedValueOnce({
+        reply: "You made $10 today.",
+        messages: [...inputMessages, newToolCall, newToolResult, finalReply],
+      } as never);
+
+      const app = await buildTestApp();
+      const res = await app.inject({ method: "POST", url: "/api/assistant", payload: { messages: inputMessages } });
+
+      expect(res.json().reply).toBe("You made $10 today.");
+      expect(lastMessageContent(res)).toBe("You made $10 today.");
+    });
+  });
 });
 
 describe("POST /api/assistant/confirm", () => {

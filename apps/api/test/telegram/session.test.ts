@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCustomerId, linkChat } from "../../src/telegram/session.js";
+import { getChatIdForCustomer, getCustomerId, linkChat } from "../../src/telegram/session.js";
 
 describe("session", () => {
   it("links a new chat to a customer", () => {
@@ -27,5 +27,14 @@ describe("session", () => {
 
   it("returns undefined for an unlinked chat", () => {
     expect(getCustomerId(999)).toBeUndefined();
+  });
+
+  it("getChatIdForCustomer finds the chat linked to a given customer — the reverse of getCustomerId, needed by the Stripe webhook route", () => {
+    expect(linkChat(106, "cus_f")).toBe("linked");
+    expect(getChatIdForCustomer("cus_f")).toBe(106);
+  });
+
+  it("getChatIdForCustomer returns undefined for a customer with no linked chat", () => {
+    expect(getChatIdForCustomer("cus_never_linked")).toBeUndefined();
   });
 });

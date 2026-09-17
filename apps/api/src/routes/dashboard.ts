@@ -6,6 +6,7 @@ import {
   getPaymentActivity,
   getOverdueInvoicesSummary,
   getDisputesSummary,
+  getFailedPaymentsSummary,
   getRecentActivity,
   type PaymentActivityRange,
 } from "../agent/dashboard.js";
@@ -63,6 +64,16 @@ export async function dashboardRoutes(app: FastifyInstance) {
     } catch (err) {
       request.log.error(err);
       return reply.status(502).send({ error: "Failed to load disputes. Please try again." });
+    }
+  });
+
+  app.get("/api/dashboard/failed-payments", async (request, reply) => {
+    const stripe = createStripeClient();
+    try {
+      return await getFailedPaymentsSummary(stripe);
+    } catch (err) {
+      request.log.error(err);
+      return reply.status(502).send({ error: "Failed to load failed payments. Please try again." });
     }
   });
 

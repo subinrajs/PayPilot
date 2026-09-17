@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getDisputesSummary,
+  getFailedPaymentsSummary,
   getOverdueInvoicesSummary,
   getPaymentActivity,
   getRecentActivity,
@@ -105,6 +106,101 @@ describe("getOverdueInvoicesSummary", () => {
   });
 });
 
+describe("getFailedPaymentsSummary", () => {
+  it("lists failed charges account-wide, using billing_details name/email", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(
+      asyncIterableList([
+        fakeCharge({
+          id: "ch_1",
+          status: "failed",
+          amount: 5000,
+          billing_details: { name: "John Smith", email: "john@example.com", phone: null, address: null },
+        }),
+      ]),
+    );
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result.count).toBe(1);
+    expect(result.totalCents).toBe(5000);
+    expect(result.payments).toEqual([
+      expect.objectContaining({ id: "ch_1", customerName: "John Smith", customerEmail: "john@example.com", amountCents: 5000 }),
+    ]);
+  });
+
+  it("excludes a failed charge whose invoice has since been paid another way", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(
+      asyncIterableList([
+        fakeCharge({ id: "ch_1", status: "failed", invoice: fakeInvoice({ id: "in_1", status: "paid" }) }),
+      ]),
+    );
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result).toEqual({ count: 0, totalCents: 0, payments: [] });
+  });
+
+  it("includes a failed charge whose invoice is still unpaid", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(
+      asyncIterableList([
+        fakeCharge({ id: "ch_1", status: "failed", invoice: fakeInvoice({ id: "in_1", status: "open" }) }),
+      ]),
+    );
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result.count).toBe(1);
+  });
+
+  it("includes a failed charge with no invoice at all — nothing to check, so it stays included", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(asyncIterableList([fakeCharge({ id: "ch_1", status: "failed", invoice: null })]));
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result.count).toBe(1);
+    expect(result.payments[0].invoiceUrl).toBeNull();
+  });
+
+  it("carries the associated invoice's hosted_invoice_url through as invoiceUrl, for a real structured link", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(
+      asyncIterableList([
+        fakeCharge({
+          id: "ch_1",
+          status: "failed",
+          invoice: fakeInvoice({ id: "in_1", status: "open", hosted_invoice_url: "https://invoice.stripe.com/i/x" }),
+        }),
+      ]),
+    );
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result.payments[0].invoiceUrl).toBe("https://invoice.stripe.com/i/x");
+  });
+
+  it("excludes succeeded charges — only status:failed counts", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(asyncIterableList([fakeCharge({ id: "ch_1", status: "succeeded" })]));
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result).toEqual({ count: 0, totalCents: 0, payments: [] });
+  });
+
+  it("reports zero rather than fabricating when nothing has failed", async () => {
+    const fake = createFakeStripe();
+    fake.charges.list.mockReturnValueOnce(asyncIterableList([]));
+
+    const result = await getFailedPaymentsSummary(asStripe(fake));
+
+    expect(result).toEqual({ count: 0, totalCents: 0, payments: [] });
+  });
+});
+
 describe("getDisputesSummary", () => {
   it("includes a dispute that needs a response, with its customer name pulled from the disputed charge", async () => {
     const fake = createFakeStripe();
@@ -160,7 +256,28 @@ describe("getDisputesSummary", () => {
     expect(result).toEqual({ count: 0, totalCents: 0, disputes: [] });
   });
 
-  it("falls back to a null customer name when the charge has no billing_details.name", async () => {
+  it("falls back to the linked customer's name when the charge has no billing_details.name", async () => {
+    // Regression test: some test/dispute-triggering payment methods (confirmed against the real
+    // Stripe API — see S11's seed.ts) never populate billing_details at all, which previously
+    // left every such dispute showing "Unknown customer" in the Needs Attention panel even though
+    // the customer link was right there on the charge.
+    const fake = createFakeStripe();
+    fake.disputes.list.mockReturnValueOnce(
+      asyncIterableList([
+        fakeDispute({
+          id: "dp_1",
+          status: "needs_response",
+          charge: fakeCharge({ id: "ch_1", customer: fakeCustomer({ id: "cus_1", name: "Maya Rodriguez" }) as never }),
+        }),
+      ]),
+    );
+
+    const result = await getDisputesSummary(asStripe(fake));
+
+    expect(result.disputes[0].customerName).toBe("Maya Rodriguez");
+  });
+
+  it("falls back to a null customer name when neither billing_details nor an expanded customer has one", async () => {
     const fake = createFakeStripe();
     fake.disputes.list.mockReturnValueOnce(
       asyncIterableList([fakeDispute({ id: "dp_1", status: "needs_response", charge: fakeCharge({ id: "ch_1" }) })]),
@@ -169,6 +286,15 @@ describe("getDisputesSummary", () => {
     const result = await getDisputesSummary(asStripe(fake));
 
     expect(result.disputes[0].customerName).toBeNull();
+  });
+
+  it("expands the charge's customer, not just the charge", async () => {
+    const fake = createFakeStripe();
+    fake.disputes.list.mockReturnValueOnce(asyncIterableList([]));
+
+    await getDisputesSummary(asStripe(fake));
+
+    expect(fake.disputes.list).toHaveBeenCalledWith(expect.objectContaining({ expand: ["data.charge", "data.charge.customer"] }));
   });
 });
 

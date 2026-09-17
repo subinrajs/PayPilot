@@ -9,10 +9,17 @@ export function createFakeStripe() {
   const fake = {
     customers: {
       list: vi.fn(),
-      retrieve: vi.fn(),
+      // Defaults to a generic customer so tests that only care about the disputed charge/invoice
+      // (most of them) don't each need to mock this — override with mockResolvedValueOnce where a
+      // test specifically needs particular customer fields or a deleted customer.
+      retrieve: vi.fn().mockResolvedValue(fakeCustomer()),
     },
     charges: {
-      list: vi.fn(),
+      // Defaults to "no charges" so tests that don't care (most of them) don't each need to mock
+      // this — override with mockResolvedValueOnce (direct-await callers) or mockReturnValueOnce
+      // (for-await callers) where a test specifically needs charge data. asyncIterableList's
+      // return value satisfies both calling conventions at once.
+      list: vi.fn().mockReturnValue(asyncIterableList([])),
       retrieve: vi.fn(),
     },
     refunds: {
@@ -44,6 +51,9 @@ export function createFakeStripe() {
     },
     disputes: {
       list: vi.fn().mockReturnValue(asyncIterableList([])),
+      retrieve: vi.fn(),
+      update: vi.fn(),
+      close: vi.fn(),
     },
     testHelpers: {
       testClocks: {
@@ -104,6 +114,42 @@ export function fakeCharge(overrides: Partial<Stripe.Charge> = {}): Stripe.Charg
   } as Stripe.Charge;
 }
 
+// Matches the real API's default shape (every evidence field null until staged) — see
+// https://docs.stripe.com/api/disputes/update's example response.
+export function fakeDisputeEvidence(overrides: Partial<Stripe.Dispute.Evidence> = {}): Stripe.Dispute.Evidence {
+  return {
+    access_activity_log: null,
+    billing_address: null,
+    cancellation_policy: null,
+    cancellation_policy_disclosure: null,
+    cancellation_rebuttal: null,
+    customer_communication: null,
+    customer_email_address: null,
+    customer_name: null,
+    customer_purchase_ip: null,
+    customer_signature: null,
+    duplicate_charge_documentation: null,
+    duplicate_charge_explanation: null,
+    duplicate_charge_id: null,
+    enhanced_evidence: {} as Stripe.Dispute.Evidence["enhanced_evidence"],
+    product_description: null,
+    receipt: null,
+    refund_policy: null,
+    refund_policy_disclosure: null,
+    refund_refusal_explanation: null,
+    service_date: null,
+    service_documentation: null,
+    shipping_address: null,
+    shipping_carrier: null,
+    shipping_date: null,
+    shipping_documentation: null,
+    shipping_tracking_number: null,
+    uncategorized_file: null,
+    uncategorized_text: null,
+    ...overrides,
+  } as Stripe.Dispute.Evidence;
+}
+
 export function fakeDispute(overrides: Partial<Stripe.Dispute> = {}): Stripe.Dispute {
   return {
     id: "dp_fake",
@@ -113,6 +159,7 @@ export function fakeDispute(overrides: Partial<Stripe.Dispute> = {}): Stripe.Dis
     charge: "ch_fake",
     reason: "general",
     status: "needs_response",
+    evidence: fakeDisputeEvidence(),
     evidence_details: { due_by: null, has_evidence: false, past_due: false, submission_count: 0 },
     ...overrides,
   } as Stripe.Dispute;
