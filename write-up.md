@@ -41,3 +41,40 @@ Full detail behind the summary in README §9. Nothing here is a bug — each ite
 **Why it's left as-is:** grammY's `Context` object isn't easily constructed in a unit test without a mocking layer that would mostly test the mock rather than real behavior. Instead, the wiring layer was verified by driving a real Telegram client against the running bot (Phase 6/7's live verification, including the at/above-cap handoff path against a real linked customer).
 
 **Practical effect:** a regression introduced only in the wiring itself (e.g. a typo in which testable-core function a handler calls, or a wrong `ctx.match` group index) would not be caught by `pnpm --filter api test` — it would only surface in live manual testing or in production use. The guardrail logic these handlers call into (ownership checks, the cap, confirmation matching) is fully covered either way, since that all lives in the tested core.
+
+# Future work
+
+Deliberately not built — either out of scope for this build, or intentionally stubbed so the rest of the app could be demonstrated without it. Unlike "Known limitations" above (deliberate scope decisions being defended), these are gaps a production version of this app would need to close.
+
+## Authentication
+
+The login screen (S15, `docs/feature.md`) is a UI-only gate — any non-empty username and password is accepted, nothing is checked server-side, and the "session" is just a username string in `localStorage`. A real version needs actual credential verification, a server-side session or token (JWT/cookie), password hashing, and the routes themselves (`/api/assistant`, `/api/reminders/send`, etc.) would need to actually enforce that session rather than trusting any caller — today every backend route is reachable by anyone who can reach the port, regardless of what the login screen shows.
+
+## Comprehensive prompts for edge cases
+
+`system-prompt.ts` (owner) and `telegram/system-prompt.ts` (customer) cover the flows this build actually exercised, but prompt-only instructions have repeatedly proven unreliable in live testing for anything the model has to remember to *not* do — restating a tile's contents in prose despite being told not to, drafting for a customer it was told to skip, embedding a raw URL despite a separate structured field existing for it (see B9 in `docs/feature.md` for the most recent instance, and S10/S11's earlier "known minor gap" notes for the same pattern). Each case found so far was fixed with a deterministic backend override rather than more prompt wording, which works but means the fix is reactive — found live, one bug report at a time — rather than the product of a systematic edge-case pass (ambiguous references, contradictory instructions mid-conversation, adversarial input, multi-intent messages) up front.
+
+## Comprehensive test evaluation
+
+The backend has real coverage (296 Vitest tests as of this write-up, plus a guardrail-auditor pass on every money-moving path) and every feature was live-verified via Playwright before being called done — but there is no automated frontend test suite at all (no component tests, no frontend-driven end-to-end suite that runs in CI), no load/performance testing, and no adversarial/security testing beyond the guardrail-auditor's manual reasoning about specific attack shapes (cross-customer access, replayed confirmations, cap bypass). A production evaluation pass would want all three, plus eval-style testing of the LLM's own behavior (prompt regression tests, not just the deterministic code around it).
+
+## Production coding standards and design patterns
+
+This app was built conversationally and iteratively, verifying each feature as it landed rather than against a pre-agreed style guide. It's consistent in the ways that mattered for correctness (Zod at every tool boundary, the pending-action pattern, deterministic aggregation), but things a longer-lived production codebase typically formalizes were never explicitly decided: a documented error-handling convention (today it's ad hoc — some routes return `{error}` strings, some throw and let a handler catch), a logging/observability strategy beyond Fastify's default logger, and a stated position on when to add an abstraction versus inline a one-off (handled case by case per CLAUDE.md's "no premature abstraction" rule, which is a philosophy, not a design-pattern catalog).
+
+## Email integration for notifications
+
+Nothing in this app sends a real email. S14's payment reminders and S13's Stripe-webhook payment notification are both explicitly simulated/Telegram-only — S14 only logs what it would have sent (`routes/reminders.ts`), and S13's "notification" is a Telegram message, not an email, since no email provider is configured anywhere (the same honest gap S10's invoice-send already has for its own confirmation emails, which are Stripe's, not this app's). A real integration (Postmark, SendGrid, SES) would need its own credentials, deliverability handling, and probably a queue rather than a synchronous send in the request path.
+
+## Real-time updates
+
+Every dashboard panel (Today's Summary, Payment Activity, Needs Attention, Recent Activity) fetches once on mount and never refreshes itself — a payment that comes in while the owner has the page open won't appear until they reload. There's no websocket/SSE connection and no polling-refresh. A production version would want push-based updates (Stripe webhooks already arrive server-side for S13's one case — a broader webhook handler could fan out to a websocket or SSE connection per connected owner) rather than requiring a manual reload.
+
+## Also worth flagging
+
+- **A real, production-grade data layer.** ADR-004's "no database" decision is well-reasoned for this build's scope (Stripe already holds everything but one small mapping), but it's a decision that stops making sense the moment there's a login system with real sessions, more persisted state than one chat-id mapping, or more than one API instance running at once — all of which land squarely in "Future work" above.
+- **Broader Stripe webhook coverage.** S13 handles exactly one event (`invoice.paid`, scoped to at/above-cap invoices) for one purpose. A production app would want a general-purpose webhook handler covering disputes, subscription events, and payment failures broadly, rather than one narrowly-scoped route added to solve one reported gap.
+- **CI/CD.** Tests and typechecking are run manually (`pnpm --filter api test`, `tsc --noEmit`) before anything is called done; nothing runs them automatically on push or PR. A GitHub Actions workflow (or equivalent) gating merges on the existing test suite would catch a regression before it reaches `main`, not after.
+- **Observability.** Structured logging exists (Fastify's built-in Pino logger), but there's no metrics, tracing, or error-reporting integration (Sentry or similar) — a production incident would be debugged from raw log lines, not a dashboard.
+- **Rate limiting / abuse protection.** `POST /api/assistant` makes a real, billed OpenAI call per request with no rate limiting of any kind — anyone who can reach the API can run up the OpenAI bill. The Telegram bot has no equivalent limit either.
+- **The Telegram bot's deployment posture.** It long-polls Telegram in the same process as the API (ADR-005), which is the right call for this build's scale but doesn't scale independently of the API and would typically move to a webhook-based bot (and possibly its own process) in production.
