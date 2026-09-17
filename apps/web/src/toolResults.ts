@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   CustomerInvoicesFound,
   DailySummary,
+  InvoiceDraft,
   OutstandingInvoicesResult,
   RefundLookupResult,
   RevenueComparison,
@@ -13,7 +14,8 @@ export type RenderItem =
   | { kind: "revenue-comparison"; key: string; data: RevenueComparison }
   | { kind: "customer-invoices"; key: string; data: CustomerInvoicesFound }
   | { kind: "refunds"; key: string; data: RefundLookupResult }
-  | { kind: "outstanding-invoices"; key: string; data: OutstandingInvoicesResult };
+  | { kind: "outstanding-invoices"; key: string; data: OutstandingInvoicesResult }
+  | { kind: "invoice-draft"; key: string; data: InvoiceDraft };
 
 function isDisplayableMessage(message: ChatMessage): boolean {
   if (message.role === "user") return true;
@@ -77,16 +79,31 @@ function isOutstandingInvoicesResult(value: unknown): value is OutstandingInvoic
   );
 }
 
-// Only these five read-only tools get structured tiles. propose_refund/propose_invoice_creation
-// results are deliberately never matched here — those already surface through
+function isInvoiceDraft(value: unknown): value is InvoiceDraft {
+  const v = value as Partial<InvoiceDraft> | null;
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    v.kind === "created" &&
+    typeof v.draftInvoiceId === "string" &&
+    Array.isArray(v.items) &&
+    Array.isArray(v.reviewFlags)
+  );
+}
+
+// Only these seven read-only-or-draft-only tools get structured tiles. propose_refund/
+// send_invoice results are deliberately never matched here — those already surface through
 // PendingActionPanel, driven by the response's separate `pendingAction` field, not by parsing
-// the raw message transcript.
+// the raw message transcript. create_invoice_draft/update_invoice_draft's ambiguous/not-found
+// variants (no draftInvoiceId) fall through and stay invisible, same as every other tool here.
 const TILE_TOOLS = new Set([
   "get_daily_summary",
   "get_revenue_comparison",
   "get_customer_invoices",
   "get_refunds",
   "get_outstanding_invoices",
+  "create_invoice_draft",
+  "update_invoice_draft",
 ]);
 
 type PendingRenderItem = RenderItem & { turn: number; dedupeKey?: string };
@@ -165,6 +182,16 @@ export function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
             data: parsed,
             turn,
             dedupeKey: `outstanding-invoices:${parsed.status}`,
+          });
+          return;
+        }
+        if ((toolName === "create_invoice_draft" || toolName === "update_invoice_draft") && isInvoiceDraft(parsed)) {
+          items.push({
+            kind: "invoice-draft",
+            key: `tool-${index}`,
+            data: parsed,
+            turn,
+            dedupeKey: `invoice-draft:${parsed.draftInvoiceId}`,
           });
           return;
         }

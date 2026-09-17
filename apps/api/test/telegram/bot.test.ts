@@ -246,6 +246,7 @@ describe("formatInvoiceList", () => {
       overdue: false,
       description: "Q3 services",
       hostedInvoiceUrl: "https://invoice.stripe.com/i/abc",
+      createdAt: "2026-09-01T00:00:00.000Z",
       ...overrides,
     };
   }

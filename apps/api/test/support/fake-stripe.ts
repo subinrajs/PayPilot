@@ -23,14 +23,24 @@ export function createFakeStripe() {
       list: vi.fn().mockReturnValue(asyncIterableList([])),
     },
     invoices: {
-      list: vi.fn(),
+      // Defaults to "no invoices" so tests that don't care (most of them) don't each need to mock
+      // this — override with mockResolvedValueOnce where a test specifically needs invoice history.
+      list: vi.fn().mockResolvedValue({ data: [] }),
       create: vi.fn(),
       retrieve: vi.fn(),
+      update: vi.fn(),
       finalizeInvoice: vi.fn(),
+      sendInvoice: vi.fn(),
       pay: vi.fn(),
+      del: vi.fn(),
     },
     invoiceItems: {
       create: vi.fn(),
+      // Defaults to "no pending items" so tests that don't care (most of them) don't each need to
+      // mock this — override with mockReturnValueOnce where a test specifically needs a draft's
+      // existing line items (e.g. updateInvoiceDraft leaving items unchanged).
+      list: vi.fn().mockReturnValue(asyncIterableList([])),
+      del: vi.fn(),
     },
     disputes: {
       list: vi.fn().mockReturnValue(asyncIterableList([])),
@@ -114,11 +124,26 @@ export function fakeInvoice(overrides: Partial<Stripe.Invoice> = {}): Stripe.Inv
     object: "invoice",
     customer: "cus_fake",
     amount_due: 1000,
+    subtotal: 1000,
     status: "open",
     due_date: null,
     paid: false,
     description: null,
     hosted_invoice_url: "https://invoice.stripe.com/i/fake",
+    created: Math.floor(Date.now() / 1000),
     ...overrides,
   } as Stripe.Invoice;
+}
+
+export function fakeInvoiceItem(overrides: Partial<Stripe.InvoiceItem> = {}): Stripe.InvoiceItem {
+  return {
+    id: "ii_fake",
+    object: "invoiceitem",
+    customer: "cus_fake",
+    amount: 1000,
+    quantity: 1,
+    unit_amount: 1000,
+    description: "Item",
+    ...overrides,
+  } as Stripe.InvoiceItem;
 }

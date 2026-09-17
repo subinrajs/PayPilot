@@ -6,18 +6,21 @@ import { RevenueComparisonTile } from "./RevenueComparisonTile.js";
 import { CustomerInvoicesTile } from "./CustomerInvoicesTile.js";
 import { RefundsTile } from "./RefundsTile.js";
 import { OutstandingInvoicesTile } from "./OutstandingInvoicesTile.js";
+import { InvoiceReviewCard } from "./InvoiceReviewCard.js";
 import { TypingIndicator } from "./TypingIndicator.js";
 
 interface MessageListProps {
   messages: ChatMessage[];
   loading: boolean;
+  onSendText: (text: string) => void;
+  onEditInvoiceDraft: () => void;
 }
 
-export function MessageList({ messages, loading }: MessageListProps) {
+export function MessageList({ messages, loading, onSendText, onEditInvoiceDraft }: MessageListProps) {
   const items = buildRenderItems(messages);
 
   return (
-    <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-1 py-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 py-2">
       {items.map((item) => {
         switch (item.kind) {
           case "message":
@@ -32,6 +35,10 @@ export function MessageList({ messages, loading }: MessageListProps) {
             return <RefundsTile key={item.key} data={item.data} />;
           case "outstanding-invoices":
             return <OutstandingInvoicesTile key={item.key} data={item.data} />;
+          case "invoice-draft":
+            return (
+              <InvoiceReviewCard key={item.key} data={item.data} onSendText={onSendText} onEditRequest={onEditInvoiceDraft} />
+            );
         }
       })}
       {loading && <TypingIndicator />}

@@ -9,9 +9,18 @@ import {
 } from "./tools/revenue-comparison.js";
 import { RefundArgsSchema, proposeRefund, type RefundArgs } from "./tools/refund.js";
 import {
-  InvoiceCreationArgsSchema,
-  proposeInvoiceCreation,
-  type InvoiceCreationArgs,
+  CreateInvoiceDraftArgsSchema,
+  createInvoiceDraft,
+  type CreateInvoiceDraftArgs,
+  UpdateInvoiceDraftArgsSchema,
+  updateInvoiceDraft,
+  type UpdateInvoiceDraftArgs,
+  DiscardInvoiceDraftArgsSchema,
+  discardInvoiceDraft,
+  type DiscardInvoiceDraftArgs,
+  SendInvoiceArgsSchema,
+  proposeSendInvoice,
+  type SendInvoiceArgs,
 } from "./tools/invoice-creation.js";
 import {
   OwnerInvoiceLookupArgsSchema,
@@ -27,7 +36,7 @@ import {
 
 // The only place OpenAI function definitions are declared — generated from the same Zod schemas
 // that validate at runtime, so the model is never shown a shape different from what's enforced.
-// Deliberately just these 7 owner tools: invoice-payment is Telegram-scoped and never reaches
+// Deliberately just these 10 owner tools: invoice-payment is Telegram-scoped and never reaches
 // this loop at all (see docs/design.md — the Telegram bot calls it directly, in-process,
 // bypassing the HTTP surface entirely). get_customer_invoices resolves a customer reference here
 // and then delegates to the same lookupInvoices the Telegram bot uses (see
@@ -70,14 +79,48 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     handler: (stripe, args) => proposeRefund(stripe, args as RefundArgs),
   },
   {
-    name: "propose_invoice_creation",
+    name: "create_invoice_draft",
     description:
-      "Resolve a natural-language customer reference and propose creating an invoice for a given amount and " +
-      "due date. Does NOT create the invoice — returns a pending action the owner must separately confirm, " +
-      "or a not-found/ambiguous result if the recipient didn't resolve to exactly one customer. dueDate must " +
-      "be a concrete ISO date (resolve relative phrases like 'next Friday' yourself before calling this).",
-    parametersSchema: InvoiceCreationArgsSchema,
-    handler: (stripe, args) => proposeInvoiceCreation(stripe, args as InvoiceCreationArgs),
+      "Resolve a natural-language customer reference and create a DRAFT invoice with one or more line items " +
+      "(each with a description, quantity, and unit price). This is safe to call as soon as the owner asks — " +
+      "it creates a real but harmless draft (no charge, nothing emailed to the customer yet) and returns a " +
+      "review with the itemized breakdown, total, and a few checks (customer email on file, overdue history, " +
+      "unusual amount, possible duplicate). It does NOT send anything — call send_invoice separately, only " +
+      "when the owner explicitly approves. dueDate must be a concrete ISO date (resolve phrases like 'due in " +
+      "15 days' yourself before calling this). Returns a not-found/ambiguous result if the recipient didn't " +
+      "resolve to exactly one customer.",
+    parametersSchema: CreateInvoiceDraftArgsSchema,
+    handler: (stripe, args) => createInvoiceDraft(stripe, args as CreateInvoiceDraftArgs),
+  },
+  {
+    name: "update_invoice_draft",
+    description:
+      "Change an existing invoice DRAFT's line items, due date, and/or memo, using the draftInvoiceId from " +
+      "an earlier create_invoice_draft or update_invoice_draft result in this conversation. Use this for a " +
+      "follow-up like 'make it due in 15 days' or 'change the consulting hours to 12' — it updates the SAME " +
+      "draft and re-runs the review, it does not create a second invoice. Only fields you pass are changed; " +
+      "omit items entirely to leave them as they are. Fails if the draft was already sent or discarded.",
+    parametersSchema: UpdateInvoiceDraftArgsSchema,
+    handler: (stripe, args) => updateInvoiceDraft(stripe, args as UpdateInvoiceDraftArgs),
+  },
+  {
+    name: "discard_invoice_draft",
+    description:
+      "Delete an invoice DRAFT the owner no longer wants, using its draftInvoiceId. Only works on drafts that " +
+      "haven't been sent yet. Use this when the owner says to discard, cancel, or throw away a drafted " +
+      "invoice.",
+    parametersSchema: DiscardInvoiceDraftArgsSchema,
+    handler: (stripe, args) => discardInvoiceDraft(stripe, args as DiscardInvoiceDraftArgs),
+  },
+  {
+    name: "send_invoice",
+    description:
+      "Propose sending an invoice DRAFT (identified by its draftInvoiceId) — finalizing it and emailing the " +
+      "customer. Does NOT send anything itself — returns a pending action the owner must separately confirm, " +
+      "exactly like propose_refund. Only call this when the owner explicitly says to send/approve the " +
+      "invoice; never claim an invoice was sent before this has actually been confirmed and executed.",
+    parametersSchema: SendInvoiceArgsSchema,
+    handler: (stripe, args) => proposeSendInvoice(stripe, args as SendInvoiceArgs),
   },
   {
     name: "get_customer_invoices",

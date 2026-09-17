@@ -7,13 +7,23 @@ export function describePendingAction(action: PendingAction): string {
     return `Refund ${formatCents(action.arguments.amountCents)} to ${action.arguments.customerName}`;
   }
   return (
-    `Create a ${formatCents(action.arguments.amountCents)} invoice for ${action.arguments.customerName}, ` +
+    `Send a ${formatCents(action.arguments.totalCents)} invoice to ${action.arguments.customerName}, ` +
     `due ${action.arguments.dueDate}`
   );
 }
 
 function actionLabel(action: PendingAction): string {
-  return action.tool === "refund" ? "Refund" : "New invoice";
+  return action.tool === "refund" ? "Refund" : "Send invoice";
+}
+
+function displayAmountCents(action: PendingAction): number {
+  return action.tool === "refund" ? action.arguments.amountCents : action.arguments.totalCents;
+}
+
+function confirmationCopy(action: PendingAction): string {
+  return action.tool === "refund"
+    ? "This action needs your confirmation before anything happens in Stripe."
+    : "The draft is already saved in Stripe — nothing is emailed to the customer until you confirm.";
 }
 
 interface PendingActionPanelProps {
@@ -44,18 +54,14 @@ export function PendingActionPanel({ action, onConfirm, onCancel }: PendingActio
 
       <div className="mt-1.5 flex items-baseline justify-between gap-3">
         <span className="text-base font-medium text-white">{action.arguments.customerName}</span>
-        <span className="whitespace-nowrap text-xl font-semibold text-white">
-          {formatCents(action.arguments.amountCents)}
-        </span>
+        <span className="whitespace-nowrap text-xl font-semibold text-white">{formatCents(displayAmountCents(action))}</span>
       </div>
 
-      {action.tool === "create_invoice" && (
+      {action.tool === "send_invoice" && (
         <p className="mt-1 text-xs text-slate-300">due {action.arguments.dueDate}</p>
       )}
 
-      <p className="mt-2 text-sm text-slate-300">
-        This action needs your confirmation before anything happens in Stripe.
-      </p>
+      <p className="mt-2 text-sm text-slate-300">{confirmationCopy(action)}</p>
 
       <div className="mt-3 flex gap-2">
         <button

@@ -8,7 +8,7 @@ import { runAssistantTurn } from "../agent/loop.js";
 import { consumePendingAction, peekPendingAction } from "../agent/pending-action-store.js";
 import type { PendingAction } from "../agent/pending-action.js";
 import { executeRefund, type ResolvedRefundArgs } from "../agent/tools/refund.js";
-import { executeInvoiceCreation, type ResolvedInvoiceCreationArgs } from "../agent/tools/invoice-creation.js";
+import { executeSendInvoice, type ResolvedSendInvoiceArgs } from "../agent/tools/invoice-creation.js";
 
 // Loose on purpose beyond `role` — the client is expected to just store and resend exactly what
 // this route previously returned, including tool-call/tool-result entries whose shape is
@@ -63,7 +63,7 @@ export async function assistantRoutes(app: FastifyInstance) {
     // completely untouched for its rightful owner, not silently destroyed just because this
     // route happened to be asked about it.
     const peeked = peekPendingAction(pendingActionId);
-    if (!peeked || (peeked.tool !== "refund" && peeked.tool !== "create_invoice")) {
+    if (!peeked || (peeked.tool !== "refund" && peeked.tool !== "send_invoice")) {
       return reply.status(404).send({ error: "Unknown or expired pending action" });
     }
 
@@ -99,8 +99,8 @@ export async function executeConfirmedAction(stripe: Stripe, action: PendingActi
   switch (action.tool) {
     case "refund":
       return executeRefund(stripe, action.arguments as ResolvedRefundArgs);
-    case "create_invoice":
-      return executeInvoiceCreation(stripe, action.arguments as ResolvedInvoiceCreationArgs);
+    case "send_invoice":
+      return executeSendInvoice(stripe, action.arguments as ResolvedSendInvoiceArgs);
     default:
       throw new Error(`No executor registered for pending action tool "${action.tool}"`);
   }

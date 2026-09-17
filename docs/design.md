@@ -20,7 +20,7 @@ This document covers *how* the system in `docs/spec.md` gets built: architecture
 
 The LLM's only job is to read the conversation and pick from a fixed set of tools (functions) with fixed, hand-written implementations. The model cannot run arbitrary code or call Stripe itself — every tool is backend code that the model merely selects and supplies arguments for.
 
-For any tool that moves money (refund, invoice payment, invoice creation), tool selection and execution are two separate steps:
+For any tool that moves money (refund, invoice payment) or that has a real customer-visible effect (sending an invoice), tool selection and execution are two separate steps:
 
 1. The model selects the tool and proposes arguments. The backend does **not** execute yet — it returns a **pending action** describing what would happen.
 2. The user (owner in web chat, customer in Telegram) explicitly confirms. The backend re-validates the confirmation against the specific pending action it issued — a confirmation that doesn't match the pending action (wrong id, expired, altered amount) is rejected rather than assumed to match.
@@ -28,7 +28,11 @@ For any tool that moves money (refund, invoice payment, invoice creation), tool 
 
 The $2,000 payment cap is enforced in this same backend code path, before step 3 ever runs — it is a plain conditional on the payment amount, not something the model is asked to respect. An invoice at or above the cap never reaches a payable pending action; it's routed to handoff instead.
 
+Invoice creation (S10, `docs/feature.md`) is a deliberate exception to "the backend does not execute yet": creating the Stripe **draft** invoice itself happens immediately, without a pending action — a draft is safe and fully reversible (no charge, nothing emailed to the customer, deletable), so it's treated like a read-only tool's immediate execution rather than a money-moving one's gated execution. The step that actually matters — **sending** the invoice, which finalizes it and emails the customer — still goes through the full three-step pending-action ceremony above. See ADR-012 in `docs/decisions.md`.
+
 Read-only tools (summaries, invoice lookups, revenue comparisons) execute immediately since they can't cause unwanted side effects.
+
+The invoice draft's pre-send review (S10) follows the same "no LLM-side judgment on facts" spirit as the arithmetic rule below: missing-email, overdue-history, unusual-amount, and possible-duplicate checks are plain deterministic code (`agent/tools/invoice-creation.ts`) run against real Stripe data, not something the model is asked to judge — the model only narrates the resulting flags, same as it narrates a daily summary's numbers.
 
 Two further consequences of this principle:
 
@@ -45,7 +49,7 @@ apps/api/src/
     authorization.ts       # customer scoping — binds customerId server-side from the Telegram session,
                            # never accepted as a tool parameter
   agent/
-    tools/                 # tool implementations: summary, revenue-comparison, refund, invoice, payment, invoice lookup
+    tools/                 # tool implementations: summary, revenue-comparison, refund, invoice draft/review/send, invoice payment, invoice lookup
     loop.ts                 # OpenAI structured tool-calling loop
   telegram/
     bot.ts                  # grammY bot: /start linking, invoice view/pay, handoff at/above the cap
@@ -55,7 +59,7 @@ apps/api/src/
     health.ts                  # GET /api/health
 ```
 
-Every mutating Stripe call (refund, invoice creation, invoice payment) must pass through `policies/payment-policy.ts` and/or `policies/authorization.ts` — no tool calls Stripe directly for a money-moving action without going through these first.
+Every mutating Stripe call for a money-moving action (refund, invoice payment) must pass through `policies/payment-policy.ts` and/or `policies/authorization.ts` — no tool calls Stripe directly for one of these without going through these first. Invoice draft creation/editing/discarding is a mutating Stripe call too, but isn't money-moving (see the draft-vs-send distinction above) and so isn't cap- or authorization-scoped the same way; sending an invoice has no cap check today (the cap governs what's payable through the app's own execution path, not what can be invoiced — same as before this story).
 
 ## Why these choices
 

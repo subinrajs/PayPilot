@@ -6,9 +6,13 @@ interface ChatInputProps {
   onSubmit: (event: React.FormEvent) => void;
   disabled: boolean;
   placeholder: string;
+  // Bumped by a parent (e.g. an InvoiceReviewCard's "Edit" button) to imperatively refocus the
+  // input without exposing the underlying DOM ref — any change to this value triggers a focus,
+  // the actual number is meaningless.
+  focusSignal?: number;
 }
 
-export function ChatInput({ value, onChange, onSubmit, disabled, placeholder }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, disabled, placeholder, focusSignal }: ChatInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // A disabled input can't hold focus, so it's dropped entirely while a send/confirm is in
@@ -19,6 +23,12 @@ export function ChatInput({ value, onChange, onSubmit, disabled, placeholder }: 
       inputRef.current?.focus();
     }
   }, [disabled]);
+
+  useEffect(() => {
+    if (focusSignal !== undefined) {
+      inputRef.current?.focus();
+    }
+  }, [focusSignal]);
 
   return (
     <form onSubmit={onSubmit} className="flex items-center gap-2 pt-3">

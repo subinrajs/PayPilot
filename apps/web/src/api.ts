@@ -107,17 +107,41 @@ export interface RefundPendingArgs {
   amountCents: number;
 }
 
-export interface InvoiceCreationPendingArgs {
-  customerId: string;
+export interface SendInvoicePendingArgs {
+  draftInvoiceId: string;
   customerName: string;
-  amountCents: number;
+  totalCents: number;
   dueDate: string;
-  description: string;
 }
 
 export type PendingAction =
   | { id: string; tool: "refund"; arguments: RefundPendingArgs; expiresAt: number }
-  | { id: string; tool: "create_invoice"; arguments: InvoiceCreationPendingArgs; expiresAt: number };
+  | { id: string; tool: "send_invoice"; arguments: SendInvoicePendingArgs; expiresAt: number };
+
+// Mirrors apps/api/src/agent/tools/invoice-creation.ts's InvoiceDraft result shape by hand (S10).
+export interface InvoiceDraftLineItem {
+  description: string;
+  quantity: number;
+  unitAmountCents: number;
+  amountCents: number;
+}
+
+export interface InvoiceDraftReviewFlag {
+  severity: "ok" | "warning";
+  label: string;
+}
+
+export interface InvoiceDraft {
+  kind: "created";
+  draftInvoiceId: string;
+  customerName: string;
+  customerEmail: string | null;
+  items: InvoiceDraftLineItem[];
+  subtotalCents: number;
+  dueDate: string;
+  memo: string | null;
+  reviewFlags: InvoiceDraftReviewFlag[];
+}
 
 export interface AssistantResponse {
   // Convenience copy of the final assistant message's content — `messages` already contains it
@@ -128,6 +152,14 @@ export interface AssistantResponse {
 }
 
 export type ConfirmResult = { status: "cancelled" } | { status: "executed"; result: unknown };
+
+// The raw Stripe Invoice fields the UI cares about from a "send_invoice" confirm's result — only
+// available once actually sent (a draft has neither), which is why these live separately from
+// SendInvoicePendingArgs above rather than being folded into it.
+export interface SentInvoice {
+  number: string | null;
+  hosted_invoice_url: string | null;
+}
 
 // Mirrors apps/api/src/agent/dashboard.ts's response shapes — the direct, LLM-free dashboard
 // routes (S9). Today's Summary and Payment Activity share the same underlying DailyBucket shape;

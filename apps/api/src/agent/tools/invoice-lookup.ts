@@ -24,6 +24,10 @@ export interface InvoiceLookupResultItem {
   // Stripe's own hosted payment page (ADR-011) — lets the caller show a pay-link directly for
   // an at/above-cap invoice without a separate handoff round-trip.
   hostedInvoiceUrl: string | null;
+  // When the invoice was created — distinct from dueDate (typically in the future). Added for
+  // S10's duplicate-invoice reviewer check, which needs "was something like this sent recently,"
+  // not "is something like this due soon."
+  createdAt: string;
 }
 
 export interface InvoiceLookupResult {
@@ -61,5 +65,6 @@ function toResultItem(invoice: Stripe.Invoice, nowMs: number): InvoiceLookupResu
     overdue: invoice.status === "open" && dueDateMs !== null && dueDateMs < nowMs,
     description: invoice.description,
     hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+    createdAt: new Date(invoice.created * 1000).toISOString(),
   };
 }

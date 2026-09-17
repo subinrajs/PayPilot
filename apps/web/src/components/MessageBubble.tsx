@@ -6,6 +6,9 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  // A raw URL embedded in plain narrated text sits right next to trailing prose with nothing to
+  // delimit it, making it easy to mis-select when copying — a real link avoids that entirely.
+  const invoiceUrl = typeof message.invoiceUrl === "string" ? message.invoiceUrl : undefined;
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -15,6 +18,16 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         }`}
       >
         {message.content}
+        {invoiceUrl && (
+          <a
+            href={invoiceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1.5 block text-sm font-medium text-blue-300 hover:underline"
+          >
+            View invoice ↗
+          </a>
+        )}
       </div>
     </div>
   );

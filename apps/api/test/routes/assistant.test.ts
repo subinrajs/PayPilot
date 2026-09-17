@@ -5,12 +5,12 @@ vi.mock("../../src/stripe.js", () => ({ createStripeClient: () => ({}) }));
 vi.mock("../../src/openai.js", () => ({ createOpenAIClient: () => ({}), OPENAI_MODEL: "test-model" }));
 vi.mock("../../src/agent/loop.js", () => ({ runAssistantTurn: vi.fn() }));
 vi.mock("../../src/agent/tools/refund.js", () => ({ executeRefund: vi.fn() }));
-vi.mock("../../src/agent/tools/invoice-creation.js", () => ({ executeInvoiceCreation: vi.fn() }));
+vi.mock("../../src/agent/tools/invoice-creation.js", () => ({ executeSendInvoice: vi.fn() }));
 
 import { assistantRoutes } from "../../src/routes/assistant.js";
 import { runAssistantTurn } from "../../src/agent/loop.js";
 import { executeRefund } from "../../src/agent/tools/refund.js";
-import { executeInvoiceCreation } from "../../src/agent/tools/invoice-creation.js";
+import { executeSendInvoice } from "../../src/agent/tools/invoice-creation.js";
 import { peekPendingAction, setPendingAction } from "../../src/agent/pending-action-store.js";
 
 async function buildTestApp() {
@@ -107,14 +107,14 @@ describe("POST /api/assistant/confirm", () => {
     expect(executeRefund).toHaveBeenCalledWith(expect.anything(), { chargeId: "ch_1" });
   });
 
-  it("dispatches a confirmed invoice-creation action to executeInvoiceCreation", async () => {
+  it("dispatches a confirmed send-invoice action to executeSendInvoice", async () => {
     setPendingAction({
       id: "pa_invoice",
-      tool: "create_invoice",
-      arguments: { customerId: "cus_1" },
+      tool: "send_invoice",
+      arguments: { draftInvoiceId: "in_1" },
       expiresAt: Date.now() + 60_000,
     });
-    vi.mocked(executeInvoiceCreation).mockResolvedValueOnce({ id: "in_1" } as never);
+    vi.mocked(executeSendInvoice).mockResolvedValueOnce({ id: "in_1" } as never);
 
     const app = await buildTestApp();
     const res = await app.inject({
@@ -124,7 +124,7 @@ describe("POST /api/assistant/confirm", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(executeInvoiceCreation).toHaveBeenCalledWith(expect.anything(), { customerId: "cus_1" });
+    expect(executeSendInvoice).toHaveBeenCalledWith(expect.anything(), { draftInvoiceId: "in_1" });
   });
 
   it("rejects confirming the same pending action a second time", async () => {
@@ -168,7 +168,7 @@ describe("POST /api/assistant/confirm", () => {
 
     expect(res.statusCode).toBe(404);
     expect(executeRefund).not.toHaveBeenCalled();
-    expect(executeInvoiceCreation).not.toHaveBeenCalled();
+    expect(executeSendInvoice).not.toHaveBeenCalled();
     // Still there — proves this route peeked and rejected without consuming.
     expect(peekPendingAction("pa_telegram")).not.toBeNull();
   });

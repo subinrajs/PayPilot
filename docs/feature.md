@@ -17,7 +17,7 @@ The Status/Notes table is kept in sync with implementation by the `plan-tracker`
 |---|---|---|---|---|---|
 | S1 | Story | Daily summary | Owner | Done | |
 | S2 | Story | Refund a payment | Owner | Done | |
-| S3 | Story | Create an invoice | Owner | Done | |
+| S3 | Story | Create an invoice | Owner | Superseded | Single-amount, one-step create+finalize+send flow replaced by S10's multi-item draft/review/send lifecycle |
 | S4 | Story | Compare revenue across periods | Owner | Done | |
 | S5 | Story | Link Telegram chat to Stripe customer | Customer | Done | |
 | S6 | Story | View what I owe | Customer | Done | |
@@ -30,6 +30,7 @@ The Status/Notes table is kept in sync with implementation by the `plan-tracker`
 | B2 | Bug | Duplicate invoice tiles for one reply | Owner | Done | Fixed 2026-09-16 — see `## Bugs, tasks & chores` |
 | B3 | Bug | "List refunds" crashed with "assistant failed to respond" | Owner | Done | Fixed 2026-09-16 — see `## Bugs, tasks & chores` |
 | B4 | Bug | "Any outstanding invoice" looped asking for a specific customer | Owner | Done | Fixed 2026-09-16 — see `## Bugs, tasks & chores` |
+| S10 | Story | AI invoice creator, reviewer & sender | Owner | Done | Supersedes S3 — multi-line-item drafts, a pre-send reviewer, and an explicit approve-and-send step; live-verified end-to-end against real seed data (John Smith), including the natural-language edit and the real sent invoice's number/hosted link |
 
 ## Web chat (business owner)
 
@@ -50,13 +51,34 @@ As the business owner, I want to refund a specific payment by describing it in n
 - If the reference is ambiguous (e.g., multiple candidate payments), the assistant asks for clarification instead of guessing.
 - Confirming a pending action whose underlying payment no longer matches (e.g., expired, already refunded) is rejected with a clear error, not silently applied to something else.
 
-### S3. Create an invoice
+### S3. Create an invoice — Superseded by S10
 
 As the business owner, I want to create an invoice with amount, recipient, and due date in a single instruction, so that I can bill a customer without leaving chat.
 
 - Given an instruction like "create a $250 invoice for Acme Corp due next Friday," the assistant resolves the recipient to a Stripe customer, resolves the relative date, and returns a pending action showing amount, recipient, and due date for confirmation.
 - The invoice is only created in Stripe after explicit confirmation.
 - An unresolvable recipient (no matching customer) is reported to the owner rather than silently creating a new one.
+
+*(Kept for history. S10 replaces this flow entirely — a single confirm step no longer both finalizes and sends; see S10 for the current behavior.)*
+
+### S10. AI invoice creator, reviewer & sender
+
+As the business owner, I want to build up an invoice with multiple line items conversationally, see a review of anything worth double-checking before it goes out, and explicitly approve sending it, so that I can bill customers accurately without leaving chat or accidentally sending something wrong.
+
+Reference: a design proposal the owner supplied, adapted to this codebase's actual constraints (see `.claude/context/s10-invoice-creator.md` for the full research and scoping decisions behind what's below).
+
+- **Create**: given an instruction like "create an invoice for John Smith for 10 hours of consulting at $150/hour and 5 hours of development at $125/hour, due in 15 days," the assistant resolves the customer, computes each line item's amount (quantity × unit price — computed by application code, never the model), and creates a real Stripe **draft** invoice (no charge, nothing emailed yet, fully reversible). An unresolvable or ambiguous customer reference is reported rather than guessed.
+- **Review**: the draft is shown as a structured review card — itemized line items, subtotal, tax (always "Not configured" — see Non-goals), total, due date — alongside deterministic checks: the customer's email is on file; the customer's current overdue-invoice count/total, if any; whether this amount is unusually high vs. that customer's historical average; whether a very similar invoice (same amount + same/similar description) went to this customer in the last 30 days. Checks that pass are shown too, not just problems.
+- **Edit**: a natural-language follow-up (e.g. "make it due in 15 days," "change the consulting hours to 12") updates the *same* draft invoice in Stripe and re-runs the review — it does not create a second invoice.
+- **Send**: only after the owner explicitly approves (e.g. "send it," clicking Approve & Send) does the assistant finalize and email the invoice — this is a pending action requiring the same confirm ceremony as a refund; nothing is sent on the strength of the draft or the review alone. The confirmation names the real invoice number and a working hosted invoice link, only available once actually sent (Stripe doesn't assign a number to a draft).
+- **Discard**: the owner can discard a draft before sending, which deletes the Stripe draft rather than leaving it orphaned.
+- Confirming a stale "send" (e.g. the draft was already sent or discarded elsewhere) is rejected with a clear error rather than silently re-sending or acting on the wrong invoice.
+
+**Non-goals for this story** (explicitly out of scope, not silently dropped):
+- **Tax** — always shown as "Not configured." Stripe Tax (`automatic_tax`) isn't confirmed enabled on this account; wiring it in without that confirmation risks looking broken rather than honestly unbuilt (same reasoning as S9's deferred Payouts gap).
+- **Proactive overdue notifications** — no webhook or notification infrastructure exists in this codebase. A sent invoice surfaces automatically in the existing Needs Attention dashboard panel once it's actually overdue; the assistant says this honestly rather than promising a push notification. Real webhook-based notifications would be a separate future story.
+- **A line-item edit form** — edits are conversational only, matching this project's existing preference for chat as the primary interface over a traditional form.
+- **Predictive payment-timing analytics** (e.g. "this customer typically pays within 18 days") — not part of the reviewer's checks.
 
 ### S4. Compare revenue across periods
 

@@ -15,7 +15,7 @@ A customer's Telegram chat is linked to a Stripe customer via a `telegramChatId 
 
 - **Daily summaries** — natural-language recap of a day's activity (e.g. "summarize my day").
 - **Refunds** — refund a specific payment by natural-language reference (e.g. "refund Maya's last payment").
-- **Invoice creation** — create an invoice with amount, recipient, and due date from a single instruction (e.g. "create a $250 invoice for Acme Corp due next Friday").
+- **Invoice creation, review & send** — build a multi-line-item invoice conversationally (e.g. "create an invoice for John Smith for 10 hours of consulting at $150/hour and 5 hours of development at $125/hour, due in 15 days"); the draft is created in Stripe immediately (no charge, nothing emailed) and shown with a deterministic review — missing customer email, that customer's overdue-invoice history, an unusually-high-amount flag, a possible-duplicate flag. Natural-language edits (e.g. "make it due in 15 days") update the same draft. Sending — the step that actually emails the customer — is a separate, explicitly confirmed action. Tax is not yet supported (always shown as "not configured").
 - **Revenue comparisons** — compare revenue across time periods (e.g. "how much did we take last week compared to the week before").
 
 These are illustrative, not exhaustive — see README §8 for the current example set.
@@ -31,7 +31,7 @@ These are illustrative, not exhaustive — see README §8 for the current exampl
 
 - **Payment cap** — $2,000, enforced in code on the server side. This is not a prompt instruction the model can be talked around; it's a check the code performs before any payment executes. Amounts are handled in cents (Stripe's native unit), so the boundary is "$2,000 or more" (`amount >= 200000`) — an invoice for exactly $2,000 is capped, not payable through the bot.
 - **Customer scoping** — a Telegram customer's queries and actions are always constrained to their own linked `stripeCustomerId`. There is no code path by which one customer's chat can read or act on another customer's data; `customerId` is bound server-side from the chat-to-customer mapping and is never a parameter the model can set.
-- **Confirmation before money moves** — refunds, invoice creation, and payments require an explicit confirmation step; a confirmation that doesn't match the pending action is rejected rather than assumed to match.
+- **Confirmation before money moves** — refunds and payments require an explicit confirmation step; a confirmation that doesn't match the pending action is rejected rather than assumed to match. Invoice creation is more granular: drafting an invoice is safe and reversible (nothing is charged or emailed), so it happens without a confirmation step, but *sending* it — the point where the customer is actually notified — is still gated behind the same explicit-confirmation requirement as a refund.
 - **Model never executes directly** — the LLM's role is to reason over the conversation and select from a fixed set of tools; the tools (not the model) perform reads and writes against Stripe. Full rationale deferred to `design.md`.
 - **No LLM-side financial arithmetic** — totals, counts, and revenue comparisons are computed deterministically in code; the model only narrates the resulting numbers, it never derives them.
 
